@@ -549,8 +549,9 @@ def main():
 
         elif event == EVENT_SS_SHEETS_LOADED:
             data = values[EVENT_SS_SHEETS_LOADED]
-            window["-SS_SHEET-"].update(values=data["sheets"], value=data["sheets"][0] if data["sheets"] else "")
-            window["-STATUS_BAR-"].update(f"Załadowano {len(data['sheets'])} zakładek z: {data['name']}")
+            sheets_list = data["sheets"]
+            window["-SS_SHEET-"].update(values=sheets_list, value=sheets_list[0] if len(sheets_list) > 0 else "")
+            window["-STATUS_BAR-"].update(f"Załadowano {len(sheets_list)} zakładek z: {data['name']}")
 
         elif event == "-SS_SEARCH_START-":
             query = values["-SS_SEARCH_QUERY-"].strip()
