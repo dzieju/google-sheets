@@ -1,0 +1,10 @@
+# Credentials and tokens
+credentials.json
+token.json
+
+# Python
+__pycache__/
+*.py[cod]
+env/
+venv/
+.env

@@ -40,4 +40,3 @@ Pliki
 Uwagi
 - Aplikacja odczytuje całe arkusze (może być wolne przy bardzo dużych plikach). Możemy później dodać ograniczenia rozmiaru, progi lub przetwarzanie strumieniowe.
 - Nie commituj `credentials.json` ani `token.json` do repo (dodane do .gitignore).
-- Jeśli chcesz, mogę przygotować PR do gałęzi main (utworzyć branch feature/add-google-sheets-search i otworzyć PR). Jeśli chcesz, żebym zrobił to automatycznie, udziel mi dostępu (np. token) lub powiedz, żebym przygotował patch/PR body do wklejenia.
