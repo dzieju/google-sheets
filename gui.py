@@ -12,7 +12,7 @@ import FreeSimpleGUI as sg
 
 # Import existing modules
 from google_auth import build_services, TOKEN_FILE
-from sheets_search import list_spreadsheets_owned_by_me, search_in_spreadsheets
+from sheets_search import list_spreadsheets_owned_by_me, search_in_spreadsheets, search_in_sheet
 
 
 # -------------------- Events --------------------
@@ -23,6 +23,11 @@ EVENT_PREVIEW_LOADED = "-PREVIEW_LOADED-"
 EVENT_SEARCH_RESULT = "-SEARCH_RESULT-"
 EVENT_SEARCH_DONE = "-SEARCH_DONE-"
 EVENT_ERROR = "-ERROR-"
+# Events for single sheet search
+EVENT_SS_FILES_LOADED = "-SS_FILES_LOADED-"
+EVENT_SS_SHEETS_LOADED = "-SS_SHEETS_LOADED-"
+EVENT_SS_SEARCH_RESULT = "-SS_SEARCH_RESULT-"
+EVENT_SS_SEARCH_DONE = "-SS_SEARCH_DONE-"
 
 # -------------------- Global state --------------------
 drive_service = None
@@ -30,6 +35,11 @@ sheets_service = None
 current_spreadsheets = []
 search_thread = None
 stop_search_flag = threading.Event()
+# Global state for single sheet search
+ss_current_spreadsheets = []
+ss_current_sheets = []
+ss_search_thread = None
+ss_stop_search_flag = threading.Event()
 
 
 # -------------------- Helper functions --------------------
@@ -139,6 +149,74 @@ def search_thread_func(window, pattern, regex, case_sensitive, max_files):
         window.write_event_value(EVENT_SEARCH_DONE, "error")
 
 
+# -------------------- Single Sheet Search Thread Functions --------------------
+def ss_load_files_thread(window):
+    """Load spreadsheets list for single sheet search tab."""
+    global ss_current_spreadsheets
+    try:
+        if drive_service is None:
+            window.write_event_value(EVENT_ERROR, "Najpierw zaloguj się.")
+            return
+        files = list_spreadsheets_owned_by_me(drive_service)
+        ss_current_spreadsheets = files
+        window.write_event_value(EVENT_SS_FILES_LOADED, files)
+    except Exception as e:
+        window.write_event_value(EVENT_ERROR, f"Błąd ładowania plików: {e}")
+
+
+def ss_load_sheets_thread(window, spreadsheet_id, spreadsheet_name):
+    """Load sheet names for selected spreadsheet in single sheet search tab."""
+    global ss_current_sheets
+    try:
+        if sheets_service is None:
+            window.write_event_value(EVENT_ERROR, "Najpierw zaloguj się.")
+            return
+        meta = sheets_service.spreadsheets().get(
+            spreadsheetId=spreadsheet_id, fields="sheets.properties"
+        ).execute()
+        sheet_names = [sh["properties"]["title"] for sh in meta.get("sheets", [])]
+        ss_current_sheets = sheet_names
+        window.write_event_value(EVENT_SS_SHEETS_LOADED, {
+            "id": spreadsheet_id,
+            "name": spreadsheet_name,
+            "sheets": sheet_names
+        })
+    except Exception as e:
+        window.write_event_value(EVENT_ERROR, f"Błąd ładowania arkuszy: {e}")
+
+
+def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, pattern, regex, case_sensitive):
+    """Run search in a single sheet in background thread."""
+    global ss_stop_search_flag
+    try:
+        if sheets_service is None:
+            window.write_event_value(EVENT_ERROR, "Najpierw zaloguj się.")
+            return
+
+        ss_stop_search_flag.clear()
+        results_gen = search_in_sheet(
+            sheets_service,
+            spreadsheet_id=spreadsheet_id,
+            spreadsheet_name=spreadsheet_name,
+            sheet_name=sheet_name,
+            pattern=pattern,
+            regex=regex,
+            case_sensitive=case_sensitive,
+        )
+
+        for result in results_gen:
+            if ss_stop_search_flag.is_set():
+                window.write_event_value(EVENT_SS_SEARCH_DONE, "stopped")
+                return
+            window.write_event_value(EVENT_SS_SEARCH_RESULT, result)
+
+        window.write_event_value(EVENT_SS_SEARCH_DONE, "completed")
+
+    except Exception as e:
+        window.write_event_value(EVENT_ERROR, f"Błąd wyszukiwania: {e}")
+        window.write_event_value(EVENT_SS_SEARCH_DONE, "error")
+
+
 # -------------------- GUI Layout --------------------
 def create_auth_tab():
     """Create Authorization tab layout."""
@@ -194,15 +272,38 @@ def create_settings_tab():
     ]
 
 
+def create_single_sheet_search_tab():
+    """Create Single Sheet Search tab layout."""
+    return [
+        [sg.Text("Przeszukiwanie pojedynczego arkusza", font=("Helvetica", 12, "bold"))],
+        [sg.HorizontalSeparator()],
+        [sg.Button("Odśwież listę arkuszy", key="-SS_REFRESH_FILES-")],
+        [sg.Text("Wybierz arkusz:")],
+        [sg.Combo(values=[], size=(60, 1), key="-SS_SPREADSHEET-", enable_events=True, readonly=True)],
+        [sg.Text("Wybierz zakładkę:")],
+        [sg.Combo(values=[], size=(60, 1), key="-SS_SHEET-", readonly=True)],
+        [sg.HorizontalSeparator()],
+        [sg.Text("Zapytanie:"), sg.Input(key="-SS_SEARCH_QUERY-", size=(40, 1))],
+        [sg.Checkbox("Regex", key="-SS_REGEX-"), sg.Checkbox("Rozróżniaj wielkość liter", key="-SS_CASE_SENSITIVE-")],
+        [sg.Button("Szukaj", key="-SS_SEARCH_START-"), sg.Button("Zatrzymaj", key="-SS_SEARCH_STOP-", disabled=True)],
+        [sg.HorizontalSeparator()],
+        [sg.Text("Wyniki:", font=("Helvetica", 10, "bold"))],
+        [sg.Multiline(size=(80, 12), key="-SS_SEARCH_RESULTS-", disabled=True, autoscroll=True)],
+        [sg.Text("Znaleziono: 0", key="-SS_SEARCH_COUNT-")],
+        [sg.Button("Wyczyść wyniki", key="-SS_CLEAR_RESULTS-"), sg.Button("Zapisz do JSON", key="-SS_SAVE_JSON-")],
+    ]
+
+
 def create_layout():
     """Create main window layout with tabs."""
     tab_auth = sg.Tab("Autoryzacja", create_auth_tab())
     tab_files = sg.Tab("Pliki i podgląd", create_files_tab())
     tab_search = sg.Tab("Przeszukiwanie", create_search_tab())
+    tab_single_sheet = sg.Tab("Przeszukiwanie arkusza", create_single_sheet_search_tab())
     tab_settings = sg.Tab("Ustawienia", create_settings_tab())
 
     layout = [
-        [sg.TabGroup([[tab_auth, tab_files, tab_search, tab_settings]], key="-TABGROUP-")],
+        [sg.TabGroup([[tab_auth, tab_files, tab_search, tab_single_sheet, tab_settings]], key="-TABGROUP-")],
         [sg.StatusBar("Gotowe", key="-STATUS_BAR-", size=(60, 1))],
     ]
     return layout
@@ -211,7 +312,7 @@ def create_layout():
 # -------------------- Main GUI loop --------------------
 def main():
     """Main function - runs the GUI event loop."""
-    global drive_service, sheets_service, search_thread
+    global drive_service, sheets_service, search_thread, ss_search_thread
 
     sg.theme("SystemDefault")
 
@@ -225,6 +326,11 @@ def main():
     # State for search results (for JSON export)
     search_results_list = []
     current_spreadsheet_id = None
+
+    # State for single sheet search
+    ss_search_results_list = []
+    ss_current_spreadsheet_id = None
+    ss_current_spreadsheet_name = None
 
     # Update token status on startup
     window["-TOKEN_EXISTS-"].update("Tak" if os.path.exists(TOKEN_FILE) else "Nie")
@@ -402,6 +508,151 @@ def main():
                     with open(filename, "w", encoding="utf-8") as f:
                         json.dump(search_results_list, f, ensure_ascii=False, indent=2)
                     sg.popup(f"Zapisano {len(search_results_list)} wyników do:\n{filename}", title="Zapisano")
+                    window["-STATUS_BAR-"].update(f"Wyniki zapisane do: {filename}")
+                except Exception as e:
+                    sg.popup_error(f"Błąd zapisu: {e}")
+
+        # -------------------- Single Sheet Search tab events --------------------
+        elif event == "-SS_REFRESH_FILES-":
+            if drive_service is None:
+                sg.popup_error("Najpierw zaloguj się (zakładka Autoryzacja).")
+            else:
+                window["-STATUS_BAR-"].update("Ładowanie listy arkuszy...")
+                threading.Thread(target=ss_load_files_thread, args=(window,), daemon=True).start()
+
+        elif event == EVENT_SS_FILES_LOADED:
+            files = values[EVENT_SS_FILES_LOADED]
+            display_list = [f"{f['name']}  ({f['id']})" for f in files]
+            window["-SS_SPREADSHEET-"].update(values=display_list, value="")
+            window["-SS_SHEET-"].update(values=[], value="")
+            window["-STATUS_BAR-"].update(f"Załadowano {len(files)} arkuszy.")
+
+        elif event == "-SS_SPREADSHEET-":
+            selected = values["-SS_SPREADSHEET-"]
+            if selected:
+                # Find the index in the list
+                try:
+                    combo_values = window["-SS_SPREADSHEET-"].Values
+                    idx = combo_values.index(selected)
+                    file_info = ss_current_spreadsheets[idx]
+                    ss_current_spreadsheet_id = file_info["id"]
+                    ss_current_spreadsheet_name = file_info["name"]
+                    window["-SS_SHEET-"].update(values=[], value="")
+                    window["-STATUS_BAR-"].update(f"Ładowanie zakładek dla: {file_info['name']}...")
+                    threading.Thread(
+                        target=ss_load_sheets_thread,
+                        args=(window, file_info["id"], file_info["name"]),
+                        daemon=True
+                    ).start()
+                except (ValueError, IndexError, KeyError):
+                    pass
+
+        elif event == EVENT_SS_SHEETS_LOADED:
+            data = values[EVENT_SS_SHEETS_LOADED]
+            window["-SS_SHEET-"].update(values=data["sheets"], value=data["sheets"][0] if data["sheets"] else "")
+            window["-STATUS_BAR-"].update(f"Załadowano {len(data['sheets'])} zakładek z: {data['name']}")
+
+        elif event == "-SS_SEARCH_START-":
+            query = values["-SS_SEARCH_QUERY-"].strip()
+            if not query:
+                sg.popup_error("Wprowadź zapytanie do wyszukania.")
+                continue
+
+            if sheets_service is None:
+                sg.popup_error("Najpierw zaloguj się (zakładka Autoryzacja).")
+                continue
+
+            selected_spreadsheet = values["-SS_SPREADSHEET-"]
+            selected_sheet = values["-SS_SHEET-"]
+
+            if not selected_spreadsheet:
+                sg.popup_error("Wybierz arkusz z listy.")
+                continue
+
+            if not selected_sheet:
+                sg.popup_error("Wybierz zakładkę z listy.")
+                continue
+
+            # Get spreadsheet info
+            try:
+                combo_values = window["-SS_SPREADSHEET-"].Values
+                idx = combo_values.index(selected_spreadsheet)
+                file_info = ss_current_spreadsheets[idx]
+                spreadsheet_id = file_info["id"]
+                spreadsheet_name = file_info["name"]
+            except (ValueError, IndexError):
+                sg.popup_error("Błąd: nie można znaleźć wybranego arkusza.")
+                continue
+
+            # Clear previous results
+            ss_search_results_list.clear()
+            window["-SS_SEARCH_RESULTS-"].update("")
+            window["-SS_SEARCH_COUNT-"].update("Znaleziono: 0")
+
+            # Disable start, enable stop
+            window["-SS_SEARCH_START-"].update(disabled=True)
+            window["-SS_SEARCH_STOP-"].update(disabled=False)
+            window["-STATUS_BAR-"].update(f"Trwa wyszukiwanie w: {spreadsheet_name} / {selected_sheet}...")
+
+            # Start search thread
+            ss_search_thread = threading.Thread(
+                target=ss_search_thread_func,
+                args=(
+                    window,
+                    spreadsheet_id,
+                    spreadsheet_name,
+                    selected_sheet,
+                    query,
+                    values["-SS_REGEX-"],
+                    values["-SS_CASE_SENSITIVE-"]
+                ),
+                daemon=True
+            )
+            ss_search_thread.start()
+
+        elif event == "-SS_SEARCH_STOP-":
+            ss_stop_search_flag.set()
+            window["-STATUS_BAR-"].update("Zatrzymywanie wyszukiwania...")
+
+        elif event == EVENT_SS_SEARCH_RESULT:
+            result = values[EVENT_SS_SEARCH_RESULT]
+            ss_search_results_list.append(result)
+            new_line = format_result(result)
+            window["-SS_SEARCH_RESULTS-"].print(new_line)
+            window["-SS_SEARCH_COUNT-"].update(f"Znaleziono: {len(ss_search_results_list)}")
+
+        elif event == EVENT_SS_SEARCH_DONE:
+            status = values[EVENT_SS_SEARCH_DONE]
+            window["-SS_SEARCH_START-"].update(disabled=False)
+            window["-SS_SEARCH_STOP-"].update(disabled=True)
+            if status == "completed":
+                window["-STATUS_BAR-"].update(f"Wyszukiwanie zakończone. Znaleziono: {len(ss_search_results_list)}")
+            elif status == "stopped":
+                window["-STATUS_BAR-"].update(f"Wyszukiwanie zatrzymane. Znaleziono: {len(ss_search_results_list)}")
+            else:
+                window["-STATUS_BAR-"].update("Wyszukiwanie zakończone z błędem.")
+
+        elif event == "-SS_CLEAR_RESULTS-":
+            ss_search_results_list.clear()
+            window["-SS_SEARCH_RESULTS-"].update("")
+            window["-SS_SEARCH_COUNT-"].update("Znaleziono: 0")
+            window["-STATUS_BAR-"].update("Wyniki wyczyszczone.")
+
+        elif event == "-SS_SAVE_JSON-":
+            if not ss_search_results_list:
+                sg.popup("Brak wyników do zapisania.", title="Zapisz do JSON")
+                continue
+            filename = sg.popup_get_file(
+                "Zapisz wyniki do pliku JSON",
+                save_as=True,
+                default_extension=".json",
+                file_types=(("JSON Files", "*.json"), ("All Files", "*.*")),
+            )
+            if filename:
+                try:
+                    with open(filename, "w", encoding="utf-8") as f:
+                        json.dump(ss_search_results_list, f, ensure_ascii=False, indent=2)
+                    sg.popup(f"Zapisano {len(ss_search_results_list)} wyników do:\n{filename}", title="Zapisano")
                     window["-STATUS_BAR-"].update(f"Wyniki zapisane do: {filename}")
                 except Exception as e:
                     sg.popup_error(f"Błąd zapisu: {e}")
