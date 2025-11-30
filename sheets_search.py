@@ -128,6 +128,12 @@ def search_in_spreadsheets(
     flags = 0 if case_sensitive else re.IGNORECASE
     matcher = re.compile(pattern, flags) if regex else None
 
+    # Pre-compute pattern normalization and check once (optimization)
+    pattern_str = pattern if pattern else ""
+    pattern_has_digits = bool(re.search(r"\d", pattern_str))
+    norm_pat = normalize_number_string(pattern_str) if pattern_has_digits else ""
+    digit_pattern = re.compile(r"\d")  # Pre-compiled regex for digit detection
+
     for f in files:
         sid = f["id"]
         sname = f.get("name", "")
@@ -180,11 +186,9 @@ def search_in_spreadsheets(
 
                         # 3) Jeśli nie znaleziono i pattern i cell zawierają cyfry, spróbuj dopasowania
                         #    po normalizacji liczb (usuń separatory tysięcy, NBSP itp.)
-                        if not matched:
-                            pattern_str = pattern if pattern else ""
-                            if re.search(r"\d", pattern_str) and re.search(r"\d", cell_text):
+                        if not matched and pattern_has_digits:
+                            if digit_pattern.search(cell_text):
                                 norm_cell = normalize_number_string(cell_text)
-                                norm_pat = normalize_number_string(pattern_str)
                                 if norm_pat and norm_pat in norm_cell:
                                     matched = True
 
