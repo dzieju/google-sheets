@@ -5,14 +5,30 @@ Funkcje:
 - search_in_spreadsheets(drive_service, sheets_service, pattern, regex=False, case_sensitive=False, max_files=None)
 
 Poprawka: normalizacja ciągów liczbowych, aby wyszukiwanie znajdowało liczby pomimo różnego formatowania (spacje, NBSP, separatory tysięcy, przecinek/kropka).
+Dodatkowa odporność na wartości None i typy numeryczne (int/float).
 """
 
+import logging
 import re
-from typing import List, Dict, Any, Generator, Optional
+from typing import List, Dict, Any, Generator, Optional, Union
+
+# Konfiguracja loggera dla modułu
+logger = logging.getLogger(__name__)
+
 
 # helpers
-def col_index_to_a1(n: int) -> str:
-    """Konwertuje indeks kolumny 0-based na etykietę A1 (0 -> A)."""
+def col_index_to_a1(n: Union[int, None]) -> str:
+    """Konwertuje indeks kolumny 0-based na etykietę A1 (0 -> A).
+    Zwraca '?' jeśli n jest None lub nieprawidłowy.
+    """
+    if n is None:
+        return "?"
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return "?"
+    if n < 0:
+        return "?"
     s = ""
     n += 1
     while n > 0:
@@ -21,20 +37,36 @@ def col_index_to_a1(n: int) -> str:
     return s
 
 
-def cell_address(row_idx: int, col_idx: int) -> str:
-    return f"{col_index_to_a1(col_idx)}{row_idx + 1}"
+def cell_address(row_idx: Union[int, None], col_idx: Union[int, None]) -> str:
+    """Zwraca adres komórki A1. Obsługuje None/nieprawidłowe indeksy defensywnie."""
+    col_label = col_index_to_a1(col_idx)
+    if row_idx is None:
+        return f"{col_label}?"
+    try:
+        row_num = int(row_idx) + 1
+    except (TypeError, ValueError):
+        row_num = "?"
+    return f"{col_label}{row_num}"
 
 
-def normalize_number_string(s: str) -> str:
+def normalize_number_string(value: Any) -> str:
     """
-    Normalizuje ciąg zawierający liczbę:
+    Normalizuje wartość zawierającą liczbę:
+    - obsługuje None (zwraca '')
+    - obsługuje typy numeryczne (int/float) - konwertuje do str
     - usuwa spacje zwykłe i NBSP, znaki cienkiej spacji itp.
     - zamienia przecinek na kropkę (dla miejsc dziesiętnych)
     - usuwa wszystko poza cyframi, kropką i minusem
     Zwraca znormalizowany ciąg, lub '' jeśli po usunięciu nic nie zostaje.
     """
-    if s is None:
+    if value is None:
         return ""
+    # Obsługa typów numerycznych bezpośrednio
+    if isinstance(value, (int, float)):
+        # Dla float, używamy str() który da np. "38960.0" lub "123.45"
+        s = str(value)
+    else:
+        s = str(value)
     # usuń niełamiące spacje i inne biały znaki grupujące
     s = s.replace("\u00A0", "").replace("\u202F", "")
     # usuń zwykłe spacje
@@ -115,40 +147,58 @@ def search_in_spreadsheets(
             except Exception:
                 continue
             for r_idx, row in enumerate(values):
+                if row is None:
+                    continue
                 for c_idx, cell in enumerate(row):
-                    cell_text = str(cell)
-                    matched = False
-                    # 1) regex match jeśli wybrano regex
-                    if regex:
-                        try:
-                            if matcher.search(cell_text):
-                                matched = True
-                        except re.error:
-                            # błędne regex -> pomiń
-                            matched = False
-                    else:
-                        # 2) zwykły substring (case-sensitive lub nie)
-                        if case_sensitive:
-                            if pattern in cell_text:
-                                matched = True
+                    try:
+                        # Obsługa None i konwersja do str
+                        if cell is None:
+                            cell_text = ""
+                        elif isinstance(cell, (int, float)):
+                            cell_text = str(cell)
                         else:
-                            if pattern.lower() in cell_text.lower():
-                                matched = True
+                            cell_text = str(cell)
 
-                    # 3) Jeśli nie znaleziono i pattern i cell zawierają cyfry, spróbuj dopasowania
-                    #    po normalizacji liczb (usuń separatory tysięcy, NBSP itp.)
-                    if not matched:
-                        if re.search(r"\d", pattern or "") and re.search(r"\d", cell_text or ""):
-                            norm_cell = normalize_number_string(cell_text)
-                            norm_pat = normalize_number_string(pattern or "")
-                            if norm_pat and norm_pat in norm_cell:
-                                matched = True
+                        matched = False
+                        # 1) regex match jeśli wybrano regex
+                        if regex:
+                            try:
+                                if matcher and matcher.search(cell_text):
+                                    matched = True
+                            except re.error:
+                                # błędne regex -> pomiń
+                                matched = False
+                        else:
+                            # 2) zwykły substring (case-sensitive lub nie)
+                            if pattern and cell_text:
+                                if case_sensitive:
+                                    if pattern in cell_text:
+                                        matched = True
+                                else:
+                                    if pattern.lower() in cell_text.lower():
+                                        matched = True
 
-                    if matched:
-                        yield {
-                            "spreadsheetId": sid,
-                            "spreadsheetName": sname,
-                            "sheetName": title,
-                            "cell": cell_address(r_idx, c_idx),
-                            "value": cell_text,
-                        }
+                        # 3) Jeśli nie znaleziono i pattern i cell zawierają cyfry, spróbuj dopasowania
+                        #    po normalizacji liczb (usuń separatory tysięcy, NBSP itp.)
+                        if not matched:
+                            pattern_str = pattern if pattern else ""
+                            if re.search(r"\d", pattern_str) and re.search(r"\d", cell_text):
+                                norm_cell = normalize_number_string(cell_text)
+                                norm_pat = normalize_number_string(pattern_str)
+                                if norm_pat and norm_pat in norm_cell:
+                                    matched = True
+
+                        if matched:
+                            yield {
+                                "spreadsheetId": sid,
+                                "spreadsheetName": sname,
+                                "sheetName": title,
+                                "cell": cell_address(r_idx, c_idx),
+                                "value": cell_text,
+                            }
+                    except Exception as e:
+                        # Loguj błąd w pojedynczej komórce i kontynuuj wyszukiwanie
+                        logger.warning(
+                            f"Błąd przetwarzania komórki [{sname}] {title}!{cell_address(r_idx, c_idx)}: {e}"
+                        )
+                        continue
