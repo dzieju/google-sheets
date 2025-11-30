@@ -3,6 +3,8 @@ sheets_search.py
 Funkcje:
 - list_spreadsheets_owned_by_me(drive_service)
 - search_in_spreadsheets(drive_service, sheets_service, pattern, regex=False, case_sensitive=False, max_files=None)
+
+Poprawka: normalizacja ciągów liczbowych, aby wyszukiwanie znajdowało liczby pomimo różnego formatowania (spacje, NBSP, separatory tysięcy, przecinek/kropka).
 """
 
 import re
@@ -21,6 +23,27 @@ def col_index_to_a1(n: int) -> str:
 
 def cell_address(row_idx: int, col_idx: int) -> str:
     return f"{col_index_to_a1(col_idx)}{row_idx + 1}"
+
+
+def normalize_number_string(s: str) -> str:
+    """
+    Normalizuje ciąg zawierający liczbę:
+    - usuwa spacje zwykłe i NBSP, znaki cienkiej spacji itp.
+    - zamienia przecinek na kropkę (dla miejsc dziesiętnych)
+    - usuwa wszystko poza cyframi, kropką i minusem
+    Zwraca znormalizowany ciąg, lub '' jeśli po usunięciu nic nie zostaje.
+    """
+    if s is None:
+        return ""
+    # usuń niełamiące spacje i inne biały znaki grupujące
+    s = s.replace("\u00A0", "").replace("\u202F", "")
+    # usuń zwykłe spacje
+    s = s.replace(" ", "")
+    # zamień przecinek na kropkę (np. "1,23" -> "1.23")
+    s = s.replace(",", ".")
+    # zostaw tylko cyfry, kropkę i minus
+    s = re.sub(r"[^\d\.\-]", "", s)
+    return s
 
 
 def list_spreadsheets_owned_by_me(drive_service, page_size: int = 1000) -> List[Dict[str, Any]]:
@@ -61,6 +84,10 @@ def search_in_spreadsheets(
       "cell": "A1",
       "value": "..."
     }
+
+    Poprawka: jeśli standardowe dopasowanie (substring / regex) nie znajdzie nic,
+    a zarówno pattern jak i komórka zawierają cyfry, wykonujemy dopasowanie na
+    znormalizowanych ciągach liczbowych.
     """
     files = list_spreadsheets_owned_by_me(drive_service)
     if max_files:
@@ -68,7 +95,7 @@ def search_in_spreadsheets(
 
     flags = 0 if case_sensitive else re.IGNORECASE
     matcher = re.compile(pattern, flags) if regex else None
-    # jeśli zwykły substring, ewentualnie obniżamy case jeśli nie case_sensitive
+
     for f in files:
         sid = f["id"]
         sname = f.get("name", "")
@@ -91,16 +118,32 @@ def search_in_spreadsheets(
                 for c_idx, cell in enumerate(row):
                     cell_text = str(cell)
                     matched = False
+                    # 1) regex match jeśli wybrano regex
                     if regex:
-                        if matcher.search(cell_text):
-                            matched = True
+                        try:
+                            if matcher.search(cell_text):
+                                matched = True
+                        except re.error:
+                            # błędne regex -> pomiń
+                            matched = False
                     else:
+                        # 2) zwykły substring (case-sensitive lub nie)
                         if case_sensitive:
                             if pattern in cell_text:
                                 matched = True
                         else:
                             if pattern.lower() in cell_text.lower():
                                 matched = True
+
+                    # 3) Jeśli nie znaleziono i pattern i cell zawierają cyfry, spróbuj dopasowania
+                    #    po normalizacji liczb (usuń separatory tysięcy, NBSP itp.)
+                    if not matched:
+                        if re.search(r"\d", pattern or "") and re.search(r"\d", cell_text or ""):
+                            norm_cell = normalize_number_string(cell_text)
+                            norm_pat = normalize_number_string(pattern or "")
+                            if norm_pat and norm_pat in norm_cell:
+                                matched = True
+
                     if matched:
                         yield {
                             "spreadsheetId": sid,
