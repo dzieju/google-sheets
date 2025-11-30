@@ -209,6 +209,52 @@ def search_in_spreadsheets(
                         continue
 
 
+def search_in_spreadsheet(
+    sheets_service,
+    spreadsheet_id: str,
+    spreadsheet_name: str,
+    pattern: str,
+    regex: bool = False,
+    case_sensitive: bool = False,
+) -> Generator[Dict[str, Any], None, None]:
+    """
+    Przeszukuje wszystkie zakładki w konkretnym arkuszu wg pattern.
+    Zwraca generator wyników:
+    {
+      "spreadsheetId": ...,
+      "spreadsheetName": ...,
+      "sheetName": ...,
+      "cell": "A1",
+      "value": "..."
+    }
+
+    Wykorzystuje tę samą normalizację liczb co search_in_spreadsheets.
+    Odporność na None/nieoczekiwane typy, przechwytuje błędy per-komórka.
+    """
+    # Pobierz listę wszystkich zakładek w arkuszu
+    try:
+        meta = sheets_service.spreadsheets().get(
+            spreadsheetId=spreadsheet_id, fields="sheets.properties"
+        ).execute()
+        sheets = meta.get("sheets", [])
+    except Exception as e:
+        logger.error(f"Błąd pobierania metadanych arkusza [{spreadsheet_name}]: {e}")
+        return
+
+    # Przeszukaj każdą zakładkę
+    for sh in sheets:
+        sheet_name = sh["properties"]["title"]
+        yield from search_in_sheet(
+            sheets_service,
+            spreadsheet_id=spreadsheet_id,
+            spreadsheet_name=spreadsheet_name,
+            sheet_name=sheet_name,
+            pattern=pattern,
+            regex=regex,
+            case_sensitive=case_sensitive,
+        )
+
+
 def search_in_sheet(
     sheets_service,
     spreadsheet_id: str,
