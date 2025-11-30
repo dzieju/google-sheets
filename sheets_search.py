@@ -3,6 +3,7 @@ sheets_search.py
 Funkcje:
 - list_spreadsheets_owned_by_me(drive_service)
 - search_in_spreadsheets(drive_service, sheets_service, pattern, regex=False, case_sensitive=False, max_files=None)
+- search_in_sheet(sheets_service, spreadsheet_id, spreadsheet_name, sheet_name, pattern, regex=False, case_sensitive=False)
 
 Poprawka: normalizacja ciągów liczbowych, aby wyszukiwanie znajdowało liczby pomimo różnego formatowania (spacje, NBSP, separatory tysięcy, przecinek/kropka).
 Dodatkowa odporność na wartości None i typy numeryczne (int/float).
@@ -206,3 +207,103 @@ def search_in_spreadsheets(
                             f"Błąd przetwarzania komórki [{sname}] {title}!{cell_address(r_idx, c_idx)}: {e}"
                         )
                         continue
+
+
+def search_in_sheet(
+    sheets_service,
+    spreadsheet_id: str,
+    spreadsheet_name: str,
+    sheet_name: str,
+    pattern: str,
+    regex: bool = False,
+    case_sensitive: bool = False,
+) -> Generator[Dict[str, Any], None, None]:
+    """
+    Przeszukuje tylko wybraną zakładkę w konkretnym arkuszu wg pattern.
+    Zwraca generator wyników:
+    {
+      "spreadsheetId": ...,
+      "spreadsheetName": ...,
+      "sheetName": ...,
+      "cell": "A1",
+      "value": "..."
+    }
+
+    Wykorzystuje tę samą normalizację liczb co search_in_spreadsheets.
+    Odporność na None/nieoczekiwane typy, przechwytuje błędy per-komórka.
+    """
+    flags = 0 if case_sensitive else re.IGNORECASE
+    matcher = re.compile(pattern, flags) if regex else None
+
+    # Pre-compute pattern normalization and check once (optimization)
+    pattern_str = pattern if pattern else ""
+    pattern_has_digits = bool(re.search(r"\d", pattern_str))
+    norm_pat = normalize_number_string(pattern_str) if pattern_has_digits else ""
+    digit_pattern = re.compile(r"\d")  # Pre-compiled regex for digit detection
+
+    # Pobierz wartości z wybranej zakładki
+    try:
+        resp = sheets_service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=sheet_name,
+            majorDimension="ROWS"
+        ).execute()
+        values = resp.get("values", [])
+    except Exception as e:
+        logger.error(f"Błąd pobierania danych z arkusza [{spreadsheet_name}] {sheet_name}: {e}")
+        return
+
+    for r_idx, row in enumerate(values):
+        if row is None:
+            continue
+        for c_idx, cell in enumerate(row):
+            try:
+                # Obsługa None i konwersja do str
+                if cell is None:
+                    cell_text = ""
+                elif isinstance(cell, (int, float)):
+                    cell_text = str(cell)
+                else:
+                    cell_text = str(cell)
+
+                matched = False
+                # 1) regex match jeśli wybrano regex
+                if regex:
+                    try:
+                        if matcher and matcher.search(cell_text):
+                            matched = True
+                    except re.error:
+                        # błędne regex -> pomiń
+                        matched = False
+                else:
+                    # 2) zwykły substring (case-sensitive lub nie)
+                    if pattern and cell_text:
+                        if case_sensitive:
+                            if pattern in cell_text:
+                                matched = True
+                        else:
+                            if pattern.lower() in cell_text.lower():
+                                matched = True
+
+                # 3) Jeśli nie znaleziono i pattern i cell zawierają cyfry, spróbuj dopasowania
+                #    po normalizacji liczb (usuń separatory tysięcy, NBSP itp.)
+                if not matched and pattern_has_digits:
+                    if digit_pattern.search(cell_text):
+                        norm_cell = normalize_number_string(cell_text)
+                        if norm_pat and norm_pat in norm_cell:
+                            matched = True
+
+                if matched:
+                    yield {
+                        "spreadsheetId": spreadsheet_id,
+                        "spreadsheetName": spreadsheet_name,
+                        "sheetName": sheet_name,
+                        "cell": cell_address(r_idx, c_idx),
+                        "value": cell_text,
+                    }
+            except Exception as e:
+                # Loguj błąd w pojedynczej komórce i kontynuuj wyszukiwanie
+                logger.warning(
+                    f"Błąd przetwarzania komórki [{spreadsheet_name}] {sheet_name}!{cell_address(r_idx, c_idx)}: {e}"
+                )
+                continue
