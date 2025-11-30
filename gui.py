@@ -123,7 +123,7 @@ def search_thread_func(window, pattern, regex, case_sensitive, max_files):
             pattern=pattern,
             regex=regex,
             case_sensitive=case_sensitive,
-            max_files=max_files if max_files and max_files > 0 else None,
+            max_files=max_files if max_files > 0 else None,
         )
 
         for result in results_gen:
@@ -278,9 +278,7 @@ def main():
         elif event == "-FILES_LIST-":
             selected = values["-FILES_LIST-"]
             if selected:
-                # Parse selected item to get ID
-                selected_text = selected[0]
-                # Extract ID from "name  (id)" format
+                # Get file info using the selected index from the listbox
                 try:
                     idx = window["-FILES_LIST-"].get_indexes()[0]
                     file_info = current_spreadsheets[idx]
@@ -367,13 +365,9 @@ def main():
         elif event == EVENT_SEARCH_RESULT:
             result = values[EVENT_SEARCH_RESULT]
             search_results_list.append(result)
-            # Append to multiline
-            current_text = window["-SEARCH_RESULTS-"].get()
+            # Append new result to multiline using print_to_element for efficiency
             new_line = format_result(result)
-            if current_text:
-                window["-SEARCH_RESULTS-"].update(current_text + "\n" + new_line)
-            else:
-                window["-SEARCH_RESULTS-"].update(new_line)
+            window["-SEARCH_RESULTS-"].print(new_line)
             window["-SEARCH_COUNT-"].update(f"Znaleziono: {len(search_results_list)}")
 
         elif event == EVENT_SEARCH_DONE:
