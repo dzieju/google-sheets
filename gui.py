@@ -12,7 +12,14 @@ import FreeSimpleGUI as sg
 
 # Import existing modules
 from google_auth import build_services, TOKEN_FILE
-from sheets_search import list_spreadsheets_owned_by_me, search_in_spreadsheets, search_in_sheet, search_in_spreadsheet
+from sheets_search import (
+    list_spreadsheets_owned_by_me,
+    search_in_spreadsheets,
+    search_in_sheet,
+    search_in_spreadsheet,
+    get_sheet_headers,
+    ALL_COLUMNS_VALUES,
+)
 
 
 # -------------------- Events --------------------
@@ -26,6 +33,7 @@ EVENT_ERROR = "-ERROR-"
 # Events for single sheet search
 EVENT_SS_FILES_LOADED = "-SS_FILES_LOADED-"
 EVENT_SS_SHEETS_LOADED = "-SS_SHEETS_LOADED-"
+EVENT_SS_HEADERS_LOADED = "-SS_HEADERS_LOADED-"
 EVENT_SS_SEARCH_RESULT = "-SS_SEARCH_RESULT-"
 EVENT_SS_SEARCH_DONE = "-SS_SEARCH_DONE-"
 
@@ -194,7 +202,25 @@ def ss_load_sheets_thread(window, spreadsheet_id, spreadsheet_name):
         window.write_event_value(EVENT_ERROR, f"Błąd ładowania arkuszy: {e}")
 
 
-def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, pattern, regex, case_sensitive, all_sheets=False):
+def ss_load_headers_thread(window, spreadsheet_id, sheet_name):
+    """Load column headers for selected sheet in single sheet search tab."""
+    try:
+        if sheets_service is None:
+            window.write_event_value(EVENT_ERROR, "Najpierw zaloguj się.")
+            return
+        headers = get_sheet_headers(sheets_service, spreadsheet_id, sheet_name)
+        # Filter out empty headers
+        headers = [h for h in headers if h.strip()]
+        window.write_event_value(EVENT_SS_HEADERS_LOADED, {
+            "spreadsheet_id": spreadsheet_id,
+            "sheet_name": sheet_name,
+            "headers": headers
+        })
+    except Exception as e:
+        window.write_event_value(EVENT_ERROR, f"Błąd ładowania nagłówków: {e}")
+
+
+def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, pattern, regex, case_sensitive, all_sheets=False, search_column_name=None):
     """Run search in a single sheet or all sheets in background thread."""
     global ss_stop_search_flag
     try:
@@ -213,17 +239,19 @@ def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, 
                 pattern=pattern,
                 regex=regex,
                 case_sensitive=case_sensitive,
+                search_column_name=search_column_name,
             )
         else:
             # Search in a single sheet
             results_gen = search_in_sheet(
+                drive_service,
                 sheets_service,
                 spreadsheet_id=spreadsheet_id,
-                spreadsheet_name=spreadsheet_name,
                 sheet_name=sheet_name,
                 pattern=pattern,
                 regex=regex,
                 case_sensitive=case_sensitive,
+                search_column_name=search_column_name,
             )
 
         for result in results_gen:
@@ -306,7 +334,9 @@ def create_single_sheet_search_tab():
         [sg.Text("Wybierz arkusz:")],
         [sg.Combo(values=[], key="-SSPREADSHEETS_DROPDOWN-", enable_events=True, readonly=True, expand_x=True)],
         [sg.Text("Wybierz zakładkę:"), sg.Checkbox("Wybierz wszystkie", key="-SHEET_ALL_SHEETS-", enable_events=True)],
-        [sg.Combo(values=[], key="-SSHEETS_DROPDOWN-", readonly=True, expand_x=True)],
+        [sg.Combo(values=[], key="-SSHEETS_DROPDOWN-", enable_events=True, readonly=True, expand_x=True)],
+        [sg.Text("Kolumna do przeszukania:")],
+        [sg.Combo(values=["Wszystkie"], key="-SHEET_COLUMN_DROPDOWN-", readonly=True, expand_x=True, default_value="Wszystkie")],
         [sg.HorizontalSeparator()],
         [sg.Text("Zapytanie:"), sg.Input(key="-SHEET_QUERY-", expand_x=True)],
         [sg.Checkbox("Regex", key="-SHEET_REGEX-"), sg.Checkbox("Rozróżniaj wielkość liter", key="-SHEET_CASE-")],
@@ -575,6 +605,8 @@ def main():
                     ss_current_spreadsheet_id = file_info["id"]
                     ss_current_spreadsheet_name = file_info["name"]
                     window["-SSHEETS_DROPDOWN-"].update(values=[], value="")
+                    # Reset column dropdown when spreadsheet changes
+                    window["-SHEET_COLUMN_DROPDOWN-"].update(values=["Wszystkie"], value="Wszystkie")
                     window["-STATUS_BAR-"].update(f"Ładowanie zakładek dla: {file_info['name']}...")
                     threading.Thread(
                         target=ss_load_sheets_thread,
@@ -589,11 +621,41 @@ def main():
             sheets_list = data["sheets"]
             window["-SSHEETS_DROPDOWN-"].update(values=sheets_list, value=sheets_list[0] if len(sheets_list) > 0 else "")
             window["-STATUS_BAR-"].update(f"Załadowano {len(sheets_list)} zakładek z: {data['name']}")
+            # Load headers for first sheet if available
+            if sheets_list and ss_current_spreadsheet_id:
+                threading.Thread(
+                    target=ss_load_headers_thread,
+                    args=(window, ss_current_spreadsheet_id, sheets_list[0]),
+                    daemon=True
+                ).start()
+
+        elif event == "-SSHEETS_DROPDOWN-":
+            # Load headers when sheet is selected
+            selected_sheet = values["-SSHEETS_DROPDOWN-"]
+            if selected_sheet and ss_current_spreadsheet_id:
+                window["-STATUS_BAR-"].update(f"Ładowanie nagłówków dla: {selected_sheet}...")
+                threading.Thread(
+                    target=ss_load_headers_thread,
+                    args=(window, ss_current_spreadsheet_id, selected_sheet),
+                    daemon=True
+                ).start()
+
+        elif event == EVENT_SS_HEADERS_LOADED:
+            data = values[EVENT_SS_HEADERS_LOADED]
+            headers = data["headers"]
+            # Add "Wszystkie" as first option
+            column_options = ["Wszystkie"] + headers
+            window["-SHEET_COLUMN_DROPDOWN-"].update(values=column_options, value="Wszystkie")
+            window["-STATUS_BAR-"].update(f"Załadowano {len(headers)} nagłówków")
 
         elif event == "-SHEET_ALL_SHEETS-":
-            # Toggle sheet dropdown based on checkbox state
+            # Toggle sheet dropdown and column dropdown based on checkbox state
             all_sheets_checked = values["-SHEET_ALL_SHEETS-"]
             window["-SSHEETS_DROPDOWN-"].update(disabled=all_sheets_checked)
+            window["-SHEET_COLUMN_DROPDOWN-"].update(disabled=all_sheets_checked)
+            if all_sheets_checked:
+                # When "all sheets" is checked, set column to "Wszystkie"
+                window["-SHEET_COLUMN_DROPDOWN-"].update(value="Wszystkie")
 
         elif event == "-SHEET_SEARCH_BTN-":
             query = values["-SHEET_QUERY-"].strip()
@@ -608,6 +670,7 @@ def main():
             selected_spreadsheet = values["-SSPREADSHEETS_DROPDOWN-"]
             selected_sheet = values["-SSHEETS_DROPDOWN-"]
             all_sheets_mode = values["-SHEET_ALL_SHEETS-"]
+            selected_column = values["-SHEET_COLUMN_DROPDOWN-"]
 
             if not selected_spreadsheet:
                 sg.popup_error("Wybierz arkusz z listy.")
@@ -627,6 +690,19 @@ def main():
             except (ValueError, IndexError):
                 sg.popup_error("Błąd: nie można znaleźć wybranego arkusza.")
                 continue
+
+            # Determine search_column_name based on selection
+            # 'Wszystkie' or 'ALL' means search all columns
+            # When all_sheets_mode is True, always use 'ALL'
+            if all_sheets_mode:
+                search_column_name = "ALL"
+            elif selected_column and selected_column.lower() in ALL_COLUMNS_VALUES:
+                search_column_name = "ALL"
+            elif selected_column:
+                search_column_name = selected_column
+            else:
+                # Default to None (strict mode - only 'numer zlecenia')
+                search_column_name = None
 
             # Clear previous results
             ss_search_results_list.clear()
@@ -654,7 +730,8 @@ def main():
                     query,
                     values["-SHEET_REGEX-"],
                     values["-SHEET_CASE-"],
-                    all_sheets_mode
+                    all_sheets_mode,
+                    search_column_name
                 ),
                 daemon=True
             )
