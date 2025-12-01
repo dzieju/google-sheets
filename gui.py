@@ -603,13 +603,10 @@ def main():
             window["-STATUS_BAR-"].update(f"Załadowano {len(sheets_list)} zakładek z: {data['name']}")
 
         elif event == "-SHEET_ALL_SHEETS-":
-            # Toggle sheet dropdown and column input based on checkbox state
+            # Toggle sheet dropdown based on checkbox state
+            # Keep column input editable - user can specify a column name even when searching all sheets
             all_sheets_checked = values["-SHEET_ALL_SHEETS-"]
             window["-SSHEETS_DROPDOWN-"].update(disabled=all_sheets_checked)
-            window["-SHEET_COLUMN_INPUT-"].update(disabled=all_sheets_checked)
-            if all_sheets_checked:
-                # When "all sheets" is checked, clear and disable column input (implies ALL)
-                window["-SHEET_COLUMN_INPUT-"].update(value="")
 
         elif event == "-SHEET_SEARCH_BTN-":
             query = values["-SHEET_QUERY-"].strip()
@@ -647,10 +644,8 @@ def main():
 
             # Determine search_column_name based on input field
             # Empty, 'ALL' or 'Wszystkie' (case-insensitive) means search all columns
-            # When all_sheets_mode is True, always use 'ALL'
-            if all_sheets_mode:
-                search_column_name = "ALL"
-            elif not column_input_value or column_input_value.lower() in ALL_COLUMNS_VALUES:
+            # User can specify a column name even when searching all sheets
+            if not column_input_value or column_input_value.lower() in ALL_COLUMNS_VALUES:
                 search_column_name = "ALL"
             else:
                 # User specified a specific column name
