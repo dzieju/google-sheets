@@ -4,9 +4,15 @@ Funkcje:
 - list_spreadsheets_owned_by_me(drive_service)
 - search_in_spreadsheets(drive_service, sheets_service, pattern, regex=False, case_sensitive=False, max_files=None)
 - search_in_sheet(sheets_service, spreadsheet_id, spreadsheet_name, sheet_name, pattern, regex=False, case_sensitive=False)
+- search_in_spreadsheet(drive_service, sheets_service, spreadsheet_id, pattern, regex=False, case_sensitive=False)
 
 Poprawka: normalizacja ciągów liczbowych, aby wyszukiwanie znajdowało liczby pomimo różnego formatowania (spacje, NBSP, separatory tysięcy, przecinek/kropka).
 Dodatkowa odporność na wartości None i typy numeryczne (int/float).
+
+Nowa funkcjonalność:
+- Wykrywanie nagłówków "Numer zlecenia" i "Stawka" w arkuszu
+- Zwracanie searchedValue (numer zlecenia) i stawka w wynikach
+- Fallback: jeśli brak nagłówków, stawka z komórki po prawej
 """
 
 import logging
@@ -77,6 +83,85 @@ def normalize_number_string(value: Any) -> str:
     # zostaw tylko cyfry, kropkę i minus
     s = re.sub(r"[^\d\.\-]", "", s)
     return s
+
+
+# Warianty nagłówków dla rozpoznawania kolumn
+ZLECENIE_HEADERS = ['numer zlecenia', 'nr zlecenia', 'nr_zlecenia', 'zlecenie', 'nr z']
+STAWKA_HEADERS = ['stawka', 'stawka zł', 'stawka_pln', 'stawka netto', 'stawka_brutto']
+
+
+def find_header_indices(header_row: List[Any]) -> tuple:
+    """
+    Wyszukuje indeksy kolumn "Numer zlecenia" i "Stawka" w wierszu nagłówkowym.
+    
+    Args:
+        header_row: Lista wartości pierwszego wiersza (potencjalnego nagłówka)
+    
+    Returns:
+        Tuple (zlecenie_idx, stawka_idx) - indeksy lub (None, None) jeśli nie znaleziono
+    """
+    if not header_row:
+        return None, None
+    
+    zlecenie_idx = None
+    stawka_idx = None
+    
+    for idx, cell in enumerate(header_row):
+        if cell is None:
+            continue
+        cell_lower = str(cell).lower().strip()
+        
+        # Sprawdź warianty nagłówka "Numer zlecenia"
+        if zlecenie_idx is None:
+            for variant in ZLECENIE_HEADERS:
+                if variant in cell_lower:
+                    zlecenie_idx = idx
+                    break
+        
+        # Sprawdź warianty nagłówka "Stawka"
+        if stawka_idx is None:
+            for variant in STAWKA_HEADERS:
+                if variant in cell_lower:
+                    stawka_idx = idx
+                    break
+    
+    return zlecenie_idx, stawka_idx
+
+
+def is_likely_header_row(row: List[Any]) -> bool:
+    """
+    Sprawdza czy wiersz wygląda jak nagłówek (zawiera tekst, nie tylko liczby).
+    """
+    if not row:
+        return False
+    
+    text_cells = 0
+    for cell in row:
+        if cell is None:
+            continue
+        cell_str = str(cell).strip()
+        if cell_str and not re.match(r'^[\d\.\,\-\s]+$', cell_str):
+            text_cells += 1
+    
+    # Wiersz jest nagłówkiem jeśli ma co najmniej 2 komórki z tekstem
+    return text_cells >= 2
+
+
+def get_cell_value_safe(row: List[Any], idx: int) -> Optional[str]:
+    """
+    Bezpiecznie pobiera wartość z wiersza pod danym indeksem.
+    Zwraca None jeśli indeks poza zakresem lub wartość jest None.
+    """
+    if idx is None or idx < 0:
+        return None
+    if idx >= len(row):
+        return None
+    val = row[idx]
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return str(val)
+    return str(val)
 
 
 def list_spreadsheets_owned_by_me(drive_service, page_size: int = 1000) -> List[Dict[str, Any]]:
@@ -210,35 +295,39 @@ def search_in_spreadsheets(
 
 
 def search_in_spreadsheet(
+    drive_service,
     sheets_service,
     spreadsheet_id: str,
-    spreadsheet_name: str,
     pattern: str,
     regex: bool = False,
     case_sensitive: bool = False,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Przeszukuje wszystkie zakładki w konkretnym arkuszu wg pattern.
-    Zwraca generator wyników:
+    
+    Zwraca generator wyników w formacie:
     {
       "spreadsheetId": ...,
       "spreadsheetName": ...,
       "sheetName": ...,
       "cell": "A1",
-      "value": "..."
+      "searchedValue": "...",
+      "stawka": "..."
     }
 
     Wykorzystuje tę samą normalizację liczb co search_in_spreadsheets.
     Odporność na None/nieoczekiwane typy, przechwytuje błędy per-komórka.
     """
-    # Pobierz listę wszystkich zakładek w arkuszu
+    # Pobierz nazwę arkusza z metadanych
+    spreadsheet_name = ""
     try:
         meta = sheets_service.spreadsheets().get(
-            spreadsheetId=spreadsheet_id, fields="sheets.properties"
+            spreadsheetId=spreadsheet_id, fields="properties.title,sheets.properties"
         ).execute()
+        spreadsheet_name = meta.get("properties", {}).get("title", "")
         sheets = meta.get("sheets", [])
     except Exception as e:
-        logger.error(f"Błąd pobierania metadanych arkusza [{spreadsheet_name}]: {e}")
+        logger.error(f"Błąd pobierania metadanych arkusza [{spreadsheet_id}]: {e}")
         return
 
     # Przeszukaj każdą zakładkę
@@ -266,16 +355,26 @@ def search_in_sheet(
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Przeszukuje tylko wybraną zakładkę w konkretnym arkuszu wg pattern.
-    Zwraca generator wyników:
+    
+    Zwraca generator wyników w formacie:
     {
       "spreadsheetId": ...,
       "spreadsheetName": ...,
       "sheetName": ...,
       "cell": "A1",
-      "value": "..."
+      "searchedValue": "..." (wartość z kolumny Numer zlecenia lub znaleziona komórka),
+      "stawka": "..." (wartość z kolumny Stawka lub komórki po prawej)
     }
 
-    Wykorzystuje tę samą normalizację liczb co search_in_spreadsheets.
+    Logika wyszukiwania:
+    1. Jeśli pierwszy wiersz zawiera nagłówki "Numer zlecenia" i "Stawka":
+       - Przeszukuj tylko kolumnę "Numer zlecenia"
+       - Zwróć odpowiadającą wartość z kolumny "Stawka"
+    2. Fallback (brak nagłówków):
+       - Przeszukuj wszystkie komórki
+       - Zwróć wartość z komórki po prawej jako stawka
+
+    Wykorzystuje normalizację liczb dla porównań numerycznych.
     Odporność na None/nieoczekiwane typy, przechwytuje błędy per-komórka.
     """
     flags = 0 if case_sensitive else re.IGNORECASE
@@ -299,57 +398,111 @@ def search_in_sheet(
         logger.error(f"Błąd pobierania danych z arkusza [{spreadsheet_name}] {sheet_name}: {e}")
         return
 
-    for r_idx, row in enumerate(values):
-        if row is None:
-            continue
-        for c_idx, cell in enumerate(row):
+    if not values:
+        return
+
+    # Sprawdź czy pierwszy wiersz to nagłówek
+    first_row = values[0] if values else []
+    zlecenie_idx, stawka_idx = None, None
+    header_mode = False
+    start_row = 0
+    
+    if is_likely_header_row(first_row):
+        zlecenie_idx, stawka_idx = find_header_indices(first_row)
+        if zlecenie_idx is not None and stawka_idx is not None:
+            header_mode = True
+            start_row = 1  # Pomiń wiersz nagłówka
+            logger.debug(f"Wykryto nagłówki w [{spreadsheet_name}] {sheet_name}: "
+                        f"Zlecenie={zlecenie_idx}, Stawka={stawka_idx}")
+
+    def check_match(cell_text: str) -> bool:
+        """Sprawdza czy komórka pasuje do wzorca."""
+        matched = False
+        # 1) regex match jeśli wybrano regex
+        if regex:
             try:
-                # Obsługa None i konwersja do str
-                if cell is None:
-                    cell_text = ""
-                elif isinstance(cell, (int, float)):
-                    cell_text = str(cell)
-                else:
-                    cell_text = str(cell)
-
+                if matcher and matcher.search(cell_text):
+                    matched = True
+            except re.error:
                 matched = False
-                # 1) regex match jeśli wybrano regex
-                if regex:
-                    try:
-                        if matcher and matcher.search(cell_text):
-                            matched = True
-                    except re.error:
-                        # błędne regex -> pomiń
-                        matched = False
+        else:
+            # 2) zwykły substring (case-sensitive lub nie)
+            if pattern and cell_text:
+                if case_sensitive:
+                    if pattern in cell_text:
+                        matched = True
                 else:
-                    # 2) zwykły substring (case-sensitive lub nie)
-                    if pattern and cell_text:
-                        if case_sensitive:
-                            if pattern in cell_text:
-                                matched = True
-                        else:
-                            if pattern.lower() in cell_text.lower():
-                                matched = True
+                    if pattern.lower() in cell_text.lower():
+                        matched = True
 
-                # 3) Jeśli nie znaleziono i pattern i cell zawierają cyfry, spróbuj dopasowania
-                #    po normalizacji liczb (usuń separatory tysięcy, NBSP itp.)
-                if not matched and pattern_has_digits:
-                    if digit_pattern.search(cell_text):
-                        norm_cell = normalize_number_string(cell_text)
-                        if norm_pat and norm_pat in norm_cell:
-                            matched = True
+        # 3) Jeśli nie znaleziono i pattern i cell zawierają cyfry, spróbuj dopasowania
+        #    po normalizacji liczb (usuń separatory tysięcy, NBSP itp.)
+        if not matched and pattern_has_digits:
+            if digit_pattern.search(cell_text):
+                norm_cell = normalize_number_string(cell_text)
+                if norm_pat and norm_pat in norm_cell:
+                    matched = True
+        
+        return matched
 
-                if matched:
+    if header_mode:
+        # Tryb z nagłówkami - przeszukuj tylko kolumnę "Numer zlecenia"
+        for r_idx in range(start_row, len(values)):
+            row = values[r_idx]
+            if row is None:
+                continue
+            try:
+                # Pobierz wartość z kolumny zlecenia
+                zlecenie_value = get_cell_value_safe(row, zlecenie_idx)
+                if zlecenie_value is None:
+                    continue
+                
+                if check_match(zlecenie_value):
+                    # Pobierz wartość stawki
+                    stawka_value = get_cell_value_safe(row, stawka_idx) or ""
+                    
                     yield {
                         "spreadsheetId": spreadsheet_id,
                         "spreadsheetName": spreadsheet_name,
                         "sheetName": sheet_name,
-                        "cell": cell_address(r_idx, c_idx),
-                        "value": cell_text,
+                        "cell": cell_address(r_idx, zlecenie_idx),
+                        "searchedValue": zlecenie_value,
+                        "stawka": stawka_value,
                     }
             except Exception as e:
-                # Loguj błąd w pojedynczej komórce i kontynuuj wyszukiwanie
                 logger.warning(
-                    f"Błąd przetwarzania komórki [{spreadsheet_name}] {sheet_name}!{cell_address(r_idx, c_idx)}: {e}"
+                    f"Błąd przetwarzania wiersza [{spreadsheet_name}] {sheet_name}!{r_idx+1}: {e}"
                 )
                 continue
+    else:
+        # Tryb fallback - przeszukuj wszystkie komórki
+        for r_idx, row in enumerate(values):
+            if row is None:
+                continue
+            for c_idx, cell in enumerate(row):
+                try:
+                    # Obsługa None i konwersja do str
+                    if cell is None:
+                        cell_text = ""
+                    elif isinstance(cell, (int, float)):
+                        cell_text = str(cell)
+                    else:
+                        cell_text = str(cell)
+
+                    if check_match(cell_text):
+                        # Fallback: stawka to wartość w komórce po prawej
+                        stawka_value = get_cell_value_safe(row, c_idx + 1) or ""
+                        
+                        yield {
+                            "spreadsheetId": spreadsheet_id,
+                            "spreadsheetName": spreadsheet_name,
+                            "sheetName": sheet_name,
+                            "cell": cell_address(r_idx, c_idx),
+                            "searchedValue": cell_text,
+                            "stawka": stawka_value,
+                        }
+                except Exception as e:
+                    logger.warning(
+                        f"Błąd przetwarzania komórki [{spreadsheet_name}] {sheet_name}!{cell_address(r_idx, c_idx)}: {e}"
+                    )
+                    continue

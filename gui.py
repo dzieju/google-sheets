@@ -44,13 +44,22 @@ ss_stop_search_flag = threading.Event()
 
 # -------------------- Helper functions --------------------
 def format_result(result: dict) -> str:
-    """Format a single search result for display."""
+    """Format a single search result for display (legacy format for main search tab)."""
     return (
         f"[{result['spreadsheetName']}] "
         f"Arkusz: {result['sheetName']}, "
         f"Komórka: {result['cell']}, "
-        f"Wartość: {result['value']}"
+        f"Wartość: {result.get('value', result.get('searchedValue', ''))}"
     )
+
+
+def format_ss_result_for_table(result: dict) -> list:
+    """Format a single sheet search result as table row [Arkusz, Zlecenie, Stawka]."""
+    return [
+        result.get('sheetName', ''),
+        result.get('searchedValue', ''),
+        result.get('stawka', ''),
+    ]
 
 
 # -------------------- Background thread functions --------------------
@@ -198,9 +207,9 @@ def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, 
         if all_sheets:
             # Search in all sheets of the spreadsheet
             results_gen = search_in_spreadsheet(
+                drive_service,
                 sheets_service,
                 spreadsheet_id=spreadsheet_id,
-                spreadsheet_name=spreadsheet_name,
                 pattern=pattern,
                 regex=regex,
                 case_sensitive=case_sensitive,
@@ -287,6 +296,9 @@ def create_settings_tab():
 
 def create_single_sheet_search_tab():
     """Create Single Sheet Search tab layout."""
+    # Definicja kolumn tabeli wyników
+    table_headings = ["Arkusz", "Zlecenie", "Stawka"]
+    
     return [
         [sg.Text("Przeszukiwanie pojedynczego arkusza", font=("Helvetica", 12, "bold"))],
         [sg.HorizontalSeparator()],
@@ -297,11 +309,22 @@ def create_single_sheet_search_tab():
         [sg.Combo(values=[], key="-SSHEETS_DROPDOWN-", readonly=True, expand_x=True)],
         [sg.HorizontalSeparator()],
         [sg.Text("Zapytanie:"), sg.Input(key="-SHEET_QUERY-", expand_x=True)],
-        [sg.Checkbox("Regex", key="-SS_REGEX-"), sg.Checkbox("Rozróżniaj wielkość liter", key="-SS_CASE_SENSITIVE-")],
+        [sg.Checkbox("Regex", key="-SHEET_REGEX-"), sg.Checkbox("Rozróżniaj wielkość liter", key="-SHEET_CASE-")],
         [sg.Button("Szukaj", key="-SHEET_SEARCH_BTN-"), sg.Button("Zatrzymaj", key="-SHEET_SEARCH_STOP-", disabled=True)],
         [sg.HorizontalSeparator()],
         [sg.Text("Wyniki:", font=("Helvetica", 10, "bold"))],
-        [sg.Multiline(key="-SHEET_RESULTS-", disabled=True, autoscroll=True, expand_x=True, expand_y=True)],
+        [sg.Table(
+            values=[],
+            headings=table_headings,
+            key="-SHEET_RESULTS_TABLE-",
+            auto_size_columns=True,
+            justification='left',
+            num_rows=15,
+            expand_x=True,
+            expand_y=True,
+            enable_events=False,
+            vertical_scroll_only=False,
+        )],
         [sg.Text("Znaleziono: 0", key="-SS_SEARCH_COUNT-")],
         [sg.Button("Wyczyść wyniki", key="-SS_CLEAR_RESULTS-"), sg.Button("Zapisz do JSON", key="-SHEET_SAVE_RESULTS-")],
     ]
@@ -342,6 +365,7 @@ def main():
 
     # State for single sheet search
     ss_search_results_list = []
+    ss_table_data = []  # Data for the results table [Arkusz, Zlecenie, Stawka]
     ss_current_spreadsheet_id = None
     ss_current_spreadsheet_name = None
 
@@ -606,7 +630,8 @@ def main():
 
             # Clear previous results
             ss_search_results_list.clear()
-            window["-SHEET_RESULTS-"].update("")
+            ss_table_data.clear()
+            window["-SHEET_RESULTS_TABLE-"].update(values=[])
             window["-SS_SEARCH_COUNT-"].update("Znaleziono: 0")
 
             # Disable start, enable stop
@@ -627,8 +652,8 @@ def main():
                     spreadsheet_name,
                     selected_sheet,
                     query,
-                    values["-SS_REGEX-"],
-                    values["-SS_CASE_SENSITIVE-"],
+                    values["-SHEET_REGEX-"],
+                    values["-SHEET_CASE-"],
                     all_sheets_mode
                 ),
                 daemon=True
@@ -642,8 +667,9 @@ def main():
         elif event == EVENT_SS_SEARCH_RESULT:
             result = values[EVENT_SS_SEARCH_RESULT]
             ss_search_results_list.append(result)
-            new_line = format_result(result)
-            window["-SHEET_RESULTS-"].print(new_line)
+            table_row = format_ss_result_for_table(result)
+            ss_table_data.append(table_row)
+            window["-SHEET_RESULTS_TABLE-"].update(values=ss_table_data)
             window["-SS_SEARCH_COUNT-"].update(f"Znaleziono: {len(ss_search_results_list)}")
 
         elif event == EVENT_SS_SEARCH_DONE:
@@ -659,7 +685,8 @@ def main():
 
         elif event == "-SS_CLEAR_RESULTS-":
             ss_search_results_list.clear()
-            window["-SHEET_RESULTS-"].update("")
+            ss_table_data.clear()
+            window["-SHEET_RESULTS_TABLE-"].update(values=[])
             window["-SS_SEARCH_COUNT-"].update("Znaleziono: 0")
             window["-STATUS_BAR-"].update("Wyniki wyczyszczone.")
 
@@ -676,7 +703,17 @@ def main():
             if filename:
                 try:
                     with open(filename, "w", encoding="utf-8") as f:
-                        json.dump(ss_search_results_list, f, ensure_ascii=False, indent=2)
+                        # Zapisz każdy wynik jako osobny JSON obiekt w linii (JSONL format)
+                        for result in ss_search_results_list:
+                            # Format wynikowy: {spreadsheetName, sheetName, cell, searchedValue, stawka}
+                            export_obj = {
+                                "spreadsheetName": result.get("spreadsheetName", ""),
+                                "sheetName": result.get("sheetName", ""),
+                                "cell": result.get("cell", ""),
+                                "searchedValue": result.get("searchedValue", ""),
+                                "stawka": result.get("stawka", ""),
+                            }
+                            f.write(json.dumps(export_obj, ensure_ascii=False) + "\n")
                     sg.popup(f"Zapisano {len(ss_search_results_list)} wyników do:\n{filename}", title="Zapisano")
                     window["-STATUS_BAR-"].update(f"Wyniki zapisane do: {filename}")
                 except Exception as e:
