@@ -113,6 +113,10 @@ def extract_numeric_tokens(text: Any) -> List[str]:
     return tokens
 
 
+# Minimalna długość tokenu uznawanego za znaczący numer (krótsze mogą być częścią URL)
+MIN_MEANINGFUL_TOKEN_LENGTH = 4
+
+
 def normalize_order_number(text: Any) -> str:
     """
     Normalizuje wartość z kolumny "Numer zlecenia" do czystego numeru.
@@ -154,9 +158,6 @@ def normalize_order_number(text: Any) -> str:
     # Fallback: weź najdłuższy token
     return max(tokens, key=len)
 
-
-# Minimalna długość tokenu uznawanego za znaczący numer (krótsze mogą być częścią URL)
-MIN_MEANINGFUL_TOKEN_LENGTH = 4
 
 # Warianty nagłówków dla rozpoznawania kolumn
 ZLECENIE_HEADERS = ['numer zlecenia', 'nr zlecenia', 'nr_zlecenia', 'zlecenie', 'nr z']
