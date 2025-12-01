@@ -18,6 +18,7 @@ from sheets_search import (
     search_in_sheet,
     search_in_spreadsheet,
     get_sheet_headers,
+    ALL_COLUMNS_VALUES,
 )
 
 
@@ -695,7 +696,7 @@ def main():
             # When all_sheets_mode is True, always use 'ALL'
             if all_sheets_mode:
                 search_column_name = "ALL"
-            elif selected_column and selected_column.lower() in ['wszystkie', 'all']:
+            elif selected_column and selected_column.lower() in ALL_COLUMNS_VALUES:
                 search_column_name = "ALL"
             elif selected_column:
                 search_column_name = selected_column

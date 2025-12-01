@@ -532,6 +532,7 @@ def search_in_spreadsheet(
             regex=regex,
             case_sensitive=case_sensitive,
             search_column_name=search_column_name,
+            spreadsheet_name=spreadsheet_name,
         )
 
 
@@ -544,6 +545,7 @@ def search_in_sheet(
     regex: bool = False,
     case_sensitive: bool = False,
     search_column_name: Optional[str] = None,
+    spreadsheet_name: Optional[str] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Przeszukuje tylko wybraną zakładkę w konkretnym arkuszu wg pattern.
@@ -560,6 +562,7 @@ def search_in_sheet(
             - Jeśli 'ALL'/'Wszystkie' - przeszukuj wszystkie kolumny
             - Jeśli konkretna nazwa - przeszukuj tylko tę kolumnę
             - Jeśli None - tryb strict: przeszukuj tylko kolumnę 'numer zlecenia'
+        spreadsheet_name: Opcjonalna nazwa arkusza (unika dodatkowego wywołania API)
     
     Zwraca generator wyników w formacie:
     {
@@ -586,16 +589,16 @@ def search_in_sheet(
     Obsługuje URL-e (wyciąga numeric tokens).
     Odporność na None/nieoczekiwane typy, przechwytuje błędy per-komórka.
     """
-    # Pobierz nazwę arkusza
-    spreadsheet_name = ""
-    try:
-        meta = sheets_service.spreadsheets().get(
-            spreadsheetId=spreadsheet_id, fields="properties.title"
-        ).execute()
-        spreadsheet_name = meta.get("properties", {}).get("title", "")
-    except Exception as e:
-        logger.warning(f"Nie można pobrać nazwy arkusza [{spreadsheet_id}]: {e}")
-        spreadsheet_name = spreadsheet_id
+    # Użyj przekazanej nazwy arkusza lub pobierz ją z API
+    if spreadsheet_name is None:
+        try:
+            meta = sheets_service.spreadsheets().get(
+                spreadsheetId=spreadsheet_id, fields="properties.title"
+            ).execute()
+            spreadsheet_name = meta.get("properties", {}).get("title", "")
+        except Exception as e:
+            logger.warning(f"Nie można pobrać nazwy arkusza [{spreadsheet_id}]: {e}")
+            spreadsheet_name = spreadsheet_id
 
     flags = 0 if case_sensitive else re.IGNORECASE
     matcher = re.compile(pattern, flags) if regex else None
@@ -625,6 +628,7 @@ def search_in_sheet(
     first_row = values[0] if values else []
     has_header = is_likely_header_row(first_row)
     start_row = 1 if has_header else 0
+    header_row = first_row if has_header else None
     
     # Znajdź kolumnę stawki
     stawka_idx = find_stawka_column_index(first_row) if has_header else None
@@ -678,13 +682,15 @@ def search_in_sheet(
                     matched = True
         
         # 4) Dla URL-ów: wyciągnij tokeny numeryczne i sprawdź
-        if not matched and pattern_has_digits and ('http://' in cell_text.lower() or 'https://' in cell_text.lower() or 'www.' in cell_text.lower()):
-            numeric_tokens = extract_numeric_tokens(cell_text)
-            for token in numeric_tokens:
-                norm_token = normalize_number_string(token)
-                if norm_pat and norm_pat in norm_token:
-                    matched = True
-                    break
+        if not matched and pattern_has_digits:
+            cell_text_lower = cell_text.lower()
+            if 'http://' in cell_text_lower or 'https://' in cell_text_lower or 'www.' in cell_text_lower:
+                numeric_tokens = extract_numeric_tokens(cell_text)
+                for token in numeric_tokens:
+                    norm_token = normalize_number_string(token)
+                    if norm_pat and norm_pat in norm_token:
+                        matched = True
+                        break
         
         return matched
 
@@ -695,7 +701,7 @@ def search_in_sheet(
         else:
             # Fallback: wartość z komórki po prawej (jeśli nie ma na blackliście)
             next_col_idx = match_col_idx + 1
-            if is_column_blacklisted(first_row if has_header else None, next_col_idx):
+            if is_column_blacklisted(header_row, next_col_idx):
                 return ""
             return get_cell_value_safe(row, next_col_idx) or ""
 
