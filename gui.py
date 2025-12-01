@@ -602,10 +602,6 @@ def main():
             window["-SSHEETS_DROPDOWN-"].update(values=sheets_list, value=sheets_list[0] if len(sheets_list) > 0 else "")
             window["-STATUS_BAR-"].update(f"Załadowano {len(sheets_list)} zakładek z: {data['name']}")
 
-        elif event == "-SSHEETS_DROPDOWN-":
-            # Sheet selection changed (nothing extra needed now, column input is manual)
-            pass
-
         elif event == "-SHEET_ALL_SHEETS-":
             # Toggle sheet dropdown and column input based on checkbox state
             all_sheets_checked = values["-SHEET_ALL_SHEETS-"]
