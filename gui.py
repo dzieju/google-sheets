@@ -217,6 +217,7 @@ def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, 
         else:
             # Search in a single sheet
             results_gen = search_in_sheet(
+                drive_service,
                 sheets_service,
                 spreadsheet_id=spreadsheet_id,
                 spreadsheet_name=spreadsheet_name,
