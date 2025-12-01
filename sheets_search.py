@@ -3,16 +3,18 @@ sheets_search.py
 Funkcje:
 - list_spreadsheets_owned_by_me(drive_service)
 - search_in_spreadsheets(drive_service, sheets_service, pattern, regex=False, case_sensitive=False, max_files=None)
-- search_in_sheet(sheets_service, spreadsheet_id, spreadsheet_name, sheet_name, pattern, regex=False, case_sensitive=False)
+- search_in_sheet(drive_service, sheets_service, spreadsheet_id, spreadsheet_name, sheet_name, pattern, regex=False, case_sensitive=False)
 - search_in_spreadsheet(drive_service, sheets_service, spreadsheet_id, pattern, regex=False, case_sensitive=False)
 
 Poprawka: normalizacja ciągów liczbowych, aby wyszukiwanie znajdowało liczby pomimo różnego formatowania (spacje, NBSP, separatory tysięcy, przecinek/kropka).
 Dodatkowa odporność na wartości None i typy numeryczne (int/float).
 
 Nowa funkcjonalność:
-- Wykrywanie nagłówków "Numer zlecenia" i "Stawka" w arkuszu
-- Zwracanie searchedValue (numer zlecenia) i stawka w wynikach
-- Fallback: jeśli brak nagłówków, stawka z komórki po prawej
+- Wykrywanie nagłówków "Numer zlecenia" i "Stawka" w arkuszu (tryb STRICT)
+- W trybie STRICT: przeszukiwanie WYŁĄCZNIE kolumny "Numer zlecenia", zwracanie wartości stawki TYLKO z kolumny "Stawka"
+- Ekstrakcja tokenów numerycznych z URL-ów i tekstu (extract_numeric_tokens)
+- Zwracanie searchedValue (znormalizowany numer zlecenia) i stawka w wynikach
+- Fallback: jeśli brak nagłówków, stawka z komórki po prawej (z blacklistą kolumn)
 """
 
 import logging
