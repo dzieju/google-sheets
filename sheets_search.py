@@ -102,7 +102,10 @@ def extract_numeric_tokens(text: Any) -> List[str]:
     if text is None:
         return []
     if isinstance(text, (int, float)):
-        return [str(int(text)) if isinstance(text, float) and text == int(text) else str(text)]
+        # Dla float równego int, zwróć bez części dziesiętnej
+        if isinstance(text, float) and text == int(text):
+            return [str(int(text))]
+        return [str(text)]
     
     s = str(text)
     # Znajdź wszystkie sekwencje cyfr (opcjonalnie z minusem na początku)
@@ -144,13 +147,16 @@ def normalize_order_number(text: Any) -> str:
     
     # Jeśli jest wiele liczb, weź najdłuższą (heurystyka: główny numer jest zwykle dłuższy)
     # Ignoruj tokeny krótkie jak "1", "2" które mogą być częścią URL
-    meaningful_tokens = [t for t in tokens if len(t) >= 4]
+    meaningful_tokens = [t for t in tokens if len(t) >= MIN_MEANINGFUL_TOKEN_LENGTH]
     if meaningful_tokens:
         return max(meaningful_tokens, key=len)
     
     # Fallback: weź najdłuższy token
     return max(tokens, key=len)
 
+
+# Minimalna długość tokenu uznawanego za znaczący numer (krótsze mogą być częścią URL)
+MIN_MEANINGFUL_TOKEN_LENGTH = 4
 
 # Warianty nagłówków dla rozpoznawania kolumn
 ZLECENIE_HEADERS = ['numer zlecenia', 'nr zlecenia', 'nr_zlecenia', 'zlecenie', 'nr z']
@@ -551,6 +557,7 @@ def search_in_sheet(
         #    (np. z URL-a) i porównaj z wzorcem
         if not matched and pattern_has_digits:
             tokens = extract_numeric_tokens(cell_text)
+            pattern_lower = pattern.lower()
             for token in tokens:
                 # Porównaj token z wzorcem (exact lub contains)
                 if case_sensitive:
@@ -558,7 +565,8 @@ def search_in_sheet(
                         matched = True
                         break
                 else:
-                    if pattern.lower() in token.lower() or token.lower() in pattern.lower():
+                    token_lower = token.lower()
+                    if pattern_lower in token_lower or token_lower in pattern_lower:
                         matched = True
                         break
                 # Porównaj po normalizacji
