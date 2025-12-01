@@ -467,15 +467,15 @@ def search_in_sheet(
     # Sprawdź czy pierwszy wiersz to nagłówek
     first_row = values[0] if values else []
     zlecenie_idx, stawka_idx = None, None
-    strict_mode = False
+    headers_found = False
     start_row = 0
     
     if is_likely_header_row(first_row):
         zlecenie_idx, stawka_idx = find_header_indices(first_row)
         if zlecenie_idx is not None and stawka_idx is not None:
-            strict_mode = True
+            headers_found = True
             start_row = 1  # Pomiń wiersz nagłówka
-            logger.debug(f"Wykryto nagłówki (STRICT mode) w [{spreadsheet_name}] {sheet_name}: "
+            logger.debug(f"Wykryto nagłówki w [{spreadsheet_name}] {sheet_name}: "
                         f"Zlecenie={zlecenie_idx}, Stawka={stawka_idx}")
 
     def check_match_strict(cell_text: str) -> tuple:
@@ -529,13 +529,13 @@ def search_in_sheet(
         
         return matched, normalized_value
 
-    # STRICT MODE ONLY: jeśli brak nagłówków "Numer zlecenia" i "Stawka", nie zwracaj wyników
-    # Brak fallbacku zapobiega zwracaniu niepożądanych kolumn (np. 'Transport')
-    if not strict_mode:
+    # Wymagane nagłówki nie zostały znalezione - zwróć pusty generator
+    # (brak fallbacku zapobiega zwracaniu niepożądanych kolumn np. 'Transport')
+    if not headers_found:
         logger.debug(f"Brak nagłówków 'Numer zlecenia' i/lub 'Stawka' w [{spreadsheet_name}] {sheet_name} - pomijam zakładkę")
         return
     
-    # Tryb STRICT - przeszukuj WYŁĄCZNIE kolumnę "Numer zlecenia"
+    # Przeszukuj WYŁĄCZNIE kolumnę "Numer zlecenia"
     for r_idx in range(start_row, len(values)):
         row = values[r_idx]
         if row is None:
