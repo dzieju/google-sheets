@@ -177,11 +177,15 @@ def is_column_blacklisted(header_row: Optional[List[Any]], col_idx: int) -> bool
         col_idx: Indeks kolumny do sprawdzenia
     
     Returns:
-        True jeśli nagłówek kolumny zawiera słowo z blacklisty, False w przeciwnym razie
+        True jeśli nagłówek kolumny zawiera słowo z blacklisty, False w przeciwnym razie.
+        Returns False if header_row is None, col_idx is invalid, or out of bounds.
     """
     if header_row is None:
         return False
-    if col_idx is None or col_idx < 0 or col_idx >= len(header_row):
+    # Handle None col_idx explicitly before numeric comparisons
+    if col_idx is None:
+        return False
+    if col_idx < 0 or col_idx >= len(header_row):
         return False
     
     header_val = header_row[col_idx]
@@ -527,7 +531,9 @@ def search_in_sheet(
 
                     if check_match(cell_text):
                         # Fallback: stawka to wartość w komórce po prawej,
-                        # ALE tylko jeśli kolumna po prawej nie jest na blackliście
+                        # ALE tylko jeśli kolumna po prawej nie jest na blackliście.
+                        # Uwaga: is_column_blacklisted() obsługuje przypadek gdy next_col_idx
+                        # jest poza zakresem header_row (zwraca False).
                         next_col_idx = c_idx + 1
                         if is_column_blacklisted(potential_header, next_col_idx):
                             # Kolumna po prawej jest na blackliście - nie używaj jej jako stawka
