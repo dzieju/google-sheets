@@ -109,9 +109,14 @@ def extract_numeric_tokens(text: Any) -> List[str]:
     # Obsługa typów numerycznych
     if isinstance(text, (int, float)):
         # Dla float, jeśli jest całkowity, zwróć jako int string
-        if isinstance(text, float) and text.is_integer():
-            return [str(int(text))]
-        return [str(text)]
+        # Używamy int() aby uniknąć notacji naukowej dla dużych liczb
+        if isinstance(text, float):
+            if text.is_integer():
+                return [str(int(text))]
+            else:
+                # Dla float z częścią ułamkową, konwertuj do string bez notacji naukowej
+                return [f"{text:.10f}".rstrip('0').rstrip('.')]
+        return [str(int(text))]
     
     try:
         s = str(text)
@@ -518,7 +523,7 @@ def search_in_sheet(
         # 1) regex match jeśli wybrano regex
         if regex:
             try:
-                if matcher and matcher.search(cell_text):
+                if matcher.search(cell_text):
                     matched = True
             except re.error:
                 matched = False
@@ -540,8 +545,8 @@ def search_in_sheet(
                 norm_cell = normalize_number_string(cell_text)
                 if norm_pat and norm_pat in norm_cell:
                     matched = True
-                    # Użyj znormalizowanej wartości
-                    if norm_cell:
+                    # Użyj znormalizowanej wartości (używamy != '' zamiast if norm_cell dla obsługi '0')
+                    if norm_cell != '':
                         normalized_value = norm_cell
                 
                 # Jeśli nadal nie znaleziono, wyciągnij tokeny numeryczne
@@ -562,7 +567,7 @@ def search_in_sheet(
         # 1) regex match jeśli wybrano regex
         if regex:
             try:
-                if matcher and matcher.search(cell_text):
+                if matcher.search(cell_text):
                     matched = True
             except re.error:
                 matched = False
