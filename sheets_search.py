@@ -89,6 +89,9 @@ def normalize_number_string(value: Any) -> str:
 ZLECENIE_HEADERS = ['numer zlecenia', 'nr zlecenia', 'nr_zlecenia', 'zlecenie', 'nr z']
 STAWKA_HEADERS = ['stawka', 'stawka zł', 'stawka_pln', 'stawka netto', 'stawka_brutto']
 
+# Blacklista nazw kolumn, które NIE powinny być używane jako źródło stawki w trybie fallback
+COLUMN_BLACKLIST = ['transport', 'uwagi', 'komentarz', 'komentarze', 'notatki', 'opis', 'uwaga']
+
 
 def find_header_indices(header_row: List[Any]) -> tuple:
     """
@@ -162,6 +165,40 @@ def get_cell_value_safe(row: List[Any], idx: int) -> Optional[str]:
     if isinstance(val, (int, float)):
         return str(val)
     return str(val)
+
+
+def is_column_blacklisted(header_row: Optional[List[Any]], col_idx: int) -> bool:
+    """
+    Sprawdza czy kolumna o danym indeksie ma nagłówek z blacklisty.
+    Używane w trybie fallback, aby nie zwracać wartości z kolumn typu 'Transport'.
+    
+    Args:
+        header_row: Lista wartości pierwszego wiersza (nagłówka) lub None
+        col_idx: Indeks kolumny do sprawdzenia
+    
+    Returns:
+        True jeśli nagłówek kolumny zawiera słowo z blacklisty, False w przeciwnym razie.
+        Returns False if header_row is None, col_idx is invalid, or out of bounds.
+    """
+    if header_row is None:
+        return False
+    # Handle None col_idx explicitly before numeric comparisons
+    if col_idx is None:
+        return False
+    if col_idx < 0 or col_idx >= len(header_row):
+        return False
+    
+    header_val = header_row[col_idx]
+    if header_val is None:
+        return False
+    
+    header_lower = str(header_val).lower().strip()
+    
+    for blacklisted in COLUMN_BLACKLIST:
+        if blacklisted in header_lower:
+            return True
+    
+    return False
 
 
 def list_spreadsheets_owned_by_me(drive_service, page_size: int = 1000) -> List[Dict[str, Any]]:
@@ -476,6 +513,9 @@ def search_in_sheet(
                 continue
     else:
         # Tryb fallback - przeszukuj wszystkie komórki
+        # Pobierz pierwszy wiersz jako potencjalny nagłówek do sprawdzania blacklisty
+        potential_header = first_row if is_likely_header_row(first_row) else None
+        
         for r_idx, row in enumerate(values):
             if row is None:
                 continue
@@ -490,8 +530,16 @@ def search_in_sheet(
                         cell_text = str(cell)
 
                     if check_match(cell_text):
-                        # Fallback: stawka to wartość w komórce po prawej
-                        stawka_value = get_cell_value_safe(row, c_idx + 1) or ""
+                        # Fallback: stawka to wartość w komórce po prawej,
+                        # ALE tylko jeśli kolumna po prawej nie jest na blackliście.
+                        # Uwaga: is_column_blacklisted() obsługuje przypadek gdy next_col_idx
+                        # jest poza zakresem header_row (zwraca False).
+                        next_col_idx = c_idx + 1
+                        if is_column_blacklisted(potential_header, next_col_idx):
+                            # Kolumna po prawej jest na blackliście - nie używaj jej jako stawka
+                            stawka_value = ""
+                        else:
+                            stawka_value = get_cell_value_safe(row, next_col_idx) or ""
                         
                         yield {
                             "spreadsheetId": spreadsheet_id,
