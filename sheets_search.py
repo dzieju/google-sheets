@@ -114,14 +114,14 @@ def find_header_indices(header_row: List[Any]) -> tuple:
         # Sprawdź warianty nagłówka "Numer zlecenia"
         if zlecenie_idx is None:
             for variant in ZLECENIE_HEADERS:
-                if variant in cell_lower or cell_lower == variant:
+                if variant in cell_lower:
                     zlecenie_idx = idx
                     break
         
         # Sprawdź warianty nagłówka "Stawka"
         if stawka_idx is None:
             for variant in STAWKA_HEADERS:
-                if variant in cell_lower or cell_lower == variant:
+                if variant in cell_lower:
                     stawka_idx = idx
                     break
     
