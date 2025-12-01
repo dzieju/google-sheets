@@ -42,6 +42,9 @@ ss_current_sheets = []
 ss_search_thread = None
 ss_stop_search_flag = threading.Event()
 
+# -------------------- Constants --------------------
+ALL_COLUMNS_OPTION = "(wszystkie kolumny)"
+
 
 # -------------------- Helper functions --------------------
 def format_result(result: dict) -> str:
@@ -635,7 +638,7 @@ def main():
             data = values[EVENT_SS_HEADERS_LOADED]
             headers = data["headers"]
             # Add empty option at the beginning to allow searching all columns
-            column_options = ["(wszystkie kolumny)"] + headers if headers else []
+            column_options = [ALL_COLUMNS_OPTION] + headers if headers else []
             window["-SHEET_COLUMN_DROPDOWN-"].update(values=column_options, value=column_options[0] if column_options else "")
             window["-STATUS_BAR-"].update(f"Załadowano {len(headers)} nagłówków kolumn")
 
@@ -679,9 +682,9 @@ def main():
                 sg.popup_error("Błąd: nie można znaleźć wybranego arkusza.")
                 continue
 
-            # Determine search_column_name (None if "(wszystkie kolumny)" or empty)
+            # Determine search_column_name (None if ALL_COLUMNS_OPTION or empty)
             search_column_name = None
-            if selected_column and selected_column != "(wszystkie kolumny)":
+            if selected_column and selected_column != ALL_COLUMNS_OPTION:
                 search_column_name = selected_column
 
             # Clear previous results

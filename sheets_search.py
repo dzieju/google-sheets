@@ -109,9 +109,9 @@ def extract_numeric_tokens(text: Any) -> List[str]:
         return [normalize_number_string(text)]
     
     s = str(text)
-    # Znajdź wszystkie ciągi cyfr (z opcjonalnymi separatorami tysięcy i miejscami dziesiętnymi)
+    # Znajdź wszystkie ciągi zaczynające się od cyfry (z opcjonalnymi separatorami tysięcy i miejscami dziesiętnymi)
     # Obsługuje formaty: 123, 1 234, 1,234, 1.234, 1234.56, itp.
-    tokens = re.findall(r'[\d\s\u00A0\u202F,\.]+', s)
+    tokens = re.findall(r'\d[\d\s\u00A0\u202F,\.]*', s)
     result = []
     for t in tokens:
         normalized = normalize_number_string(t)
@@ -575,13 +575,13 @@ def search_in_sheet(
                 norm_cell = normalize_number_string(cell_text)
                 if norm_pat and norm_pat in norm_cell:
                     matched = True
-            # 4) Sprawdź również tokeny numeryczne wyekstrahowane z URL-i
-            if not matched:
-                tokens = extract_numeric_tokens(cell_text)
-                for token in tokens:
-                    if norm_pat and norm_pat in token:
-                        matched = True
-                        break
+                # 4) Sprawdź również tokeny numeryczne wyekstrahowane z URL-i (tylko jeśli jeszcze nie dopasowano)
+                if not matched:
+                    tokens = extract_numeric_tokens(cell_text)
+                    for token in tokens:
+                        if norm_pat and norm_pat in token:
+                            matched = True
+                            break
         
         return matched
 
