@@ -85,86 +85,12 @@ def normalize_number_string(value: Any) -> str:
     return s
 
 
-def extract_numeric_tokens(text: Any) -> List[str]:
-    """
-    Wyciąga wszystkie ciągi liczbowe z tekstu (np. z URL-a).
-    
-    Przykład: "https://example.com/order/38968/details" -> ["38968"]
-    Przykład: "Zlecenie 12345, kwota 100.50" -> ["12345", "100", "50"]
-    
-    Args:
-        text: Tekst do przetworzenia (może być None, int, float, str)
-    
-    Returns:
-        Lista znalezionych ciągów liczbowych (cyfry + opcjonalnie minus na początku).
-        Zwraca pustą listę jeśli brak tekstu lub brak cyfr.
-    """
-    if text is None:
-        return []
-    if isinstance(text, (int, float)):
-        # Dla float równego int, zwróć bez części dziesiętnej
-        if isinstance(text, float) and text == int(text):
-            return [str(int(text))]
-        return [str(text)]
-    
-    s = str(text)
-    # Znajdź wszystkie sekwencje cyfr (opcjonalnie z minusem na początku)
-    tokens = re.findall(r'-?\d+', s)
-    return tokens
-
-
-# Minimalna długość tokenu uznawanego za znaczący numer (krótsze mogą być częścią URL)
-MIN_MEANINGFUL_TOKEN_LENGTH = 4
-
-
-def normalize_order_number(text: Any) -> str:
-    """
-    Normalizuje wartość z kolumny "Numer zlecenia" do czystego numeru.
-    
-    Jeśli tekst to URL lub zawiera dodatkowy tekst, wyciąga główny numer.
-    Używa heurystyki: bierze najdłuższy ciąg liczbowy jako główny numer.
-    
-    Args:
-        text: Wartość z komórki (może być None, int, float, str)
-    
-    Returns:
-        Znormalizowany numer zlecenia jako string, lub oryginalny tekst jeśli brak cyfr.
-    """
-    if text is None:
-        return ""
-    if isinstance(text, (int, float)):
-        # Dla liczb całkowitych zwracamy bez części dziesiętnej
-        if isinstance(text, float) and text == int(text):
-            return str(int(text))
-        return str(text)
-    
-    s = str(text).strip()
-    
-    # Sprawdź czy to wygląda jak URL lub tekst z zagnieżdżonym numerem
-    tokens = extract_numeric_tokens(s)
-    if not tokens:
-        return s
-    
-    # Jeśli jest tylko jedna liczba w tekście, użyj jej
-    if len(tokens) == 1:
-        return tokens[0]
-    
-    # Jeśli jest wiele liczb, weź najdłuższą (heurystyka: główny numer jest zwykle dłuższy)
-    # Ignoruj tokeny krótkie jak "1", "2" które mogą być częścią URL
-    meaningful_tokens = [t for t in tokens if len(t) >= MIN_MEANINGFUL_TOKEN_LENGTH]
-    if meaningful_tokens:
-        return max(meaningful_tokens, key=len)
-    
-    # Fallback: weź najdłuższy token
-    return max(tokens, key=len)
-
-
 # Warianty nagłówków dla rozpoznawania kolumn
 ZLECENIE_HEADERS = ['numer zlecenia', 'nr zlecenia', 'nr_zlecenia', 'zlecenie', 'nr z']
 STAWKA_HEADERS = ['stawka', 'stawka zł', 'stawka_pln', 'stawka netto', 'stawka_brutto']
 
 # Blacklista nazw kolumn, które NIE powinny być używane jako źródło stawki w trybie fallback
-COLUMN_BLACKLIST = ['transport', 'uwagi', 'komentarz', 'komentarze', 'notatka', 'notatki', 'opis', 'uwaga']
+COLUMN_BLACKLIST = ['transport', 'uwagi', 'komentarz', 'komentarze', 'notatki', 'opis', 'uwaga']
 
 
 def find_header_indices(header_row: List[Any]) -> tuple:
@@ -554,32 +480,10 @@ def search_in_sheet(
                 if norm_pat and norm_pat in norm_cell:
                     matched = True
         
-        # 4) Jeśli nadal nie znaleziono, spróbuj wyciągnąć tokeny liczbowe z tekstu
-        #    (np. z URL-a) i porównaj z wzorcem
-        if not matched and pattern_has_digits:
-            tokens = extract_numeric_tokens(cell_text)
-            pattern_lower = pattern.lower()
-            for token in tokens:
-                # Porównaj token z wzorcem (exact lub contains)
-                if case_sensitive:
-                    if pattern in token or token in pattern:
-                        matched = True
-                        break
-                else:
-                    token_lower = token.lower()
-                    if pattern_lower in token_lower or token_lower in pattern_lower:
-                        matched = True
-                        break
-                # Porównaj po normalizacji
-                norm_token = normalize_number_string(token)
-                if norm_pat and (norm_pat in norm_token or norm_token in norm_pat):
-                    matched = True
-                    break
-        
         return matched
 
     if header_mode:
-        # Tryb z nagłówkami (STRICT) - przeszukuj tylko kolumnę "Numer zlecenia"
+        # Tryb z nagłówkami - przeszukuj tylko kolumnę "Numer zlecenia"
         for r_idx in range(start_row, len(values)):
             row = values[r_idx]
             if row is None:
@@ -594,15 +498,12 @@ def search_in_sheet(
                     # Pobierz wartość stawki
                     stawka_value = get_cell_value_safe(row, stawka_idx) or ""
                     
-                    # Normalizuj numer zlecenia (wyciągnij czysty numer z URL-a lub tekstu)
-                    normalized_zlecenie = normalize_order_number(zlecenie_value)
-                    
                     yield {
                         "spreadsheetId": spreadsheet_id,
                         "spreadsheetName": spreadsheet_name,
                         "sheetName": sheet_name,
                         "cell": cell_address(r_idx, zlecenie_idx),
-                        "searchedValue": normalized_zlecenie,
+                        "searchedValue": zlecenie_value,
                         "stawka": stawka_value,
                     }
             except Exception as e:
