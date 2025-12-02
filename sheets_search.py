@@ -7,6 +7,8 @@ Funkcje:
 - search_in_spreadsheet(drive_service, sheets_service, spreadsheet_id, pattern, regex=False, case_sensitive=False, search_column_name=None)
 - get_sheet_headers(sheets_service, spreadsheet_id, sheet_name)
 - detect_header_row(values, search_column_name=None)
+- find_duplicates_in_sheet(drive_service, sheets_service, spreadsheet_id, sheet_name, search_column_name, normalize=True)
+- find_duplicates_across_spreadsheets(drive_service, sheets_service, spreadsheet_ids, search_column_name, normalize=True)
 
 Poprawka: normalizacja ciągów liczbowych, aby wyszukiwanie znajdowało liczby pomimo różnego formatowania (spacje, NBSP, separatory tysięcy, przecinek/kropka).
 Dodatkowa odporność na wartości None i typy numeryczne (int/float).
@@ -24,7 +26,8 @@ Nowa funkcjonalność:
 import logging
 import re
 import threading
-from typing import List, Dict, Any, Generator, Optional, Union
+from collections import Counter
+from typing import List, Dict, Any, Generator, Optional, Union, Tuple
 
 # Konfiguracja loggera dla modułu
 logger = logging.getLogger(__name__)
@@ -964,4 +967,250 @@ def search_across_spreadsheets(
         except Exception as e:
             # Błąd przy jednym arkuszu nie przerywa całego procesu
             logger.warning(f"Błąd przeszukiwania arkusza [{spreadsheet_id}]: {e}")
+            continue
+
+
+def find_duplicates_in_sheet(
+    drive_service,
+    sheets_service,
+    spreadsheet_id: str,
+    sheet_name: str,
+    search_column_name: str,
+    normalize: bool = True,
+    spreadsheet_name: Optional[str] = None,
+    stop_event: Optional[threading.Event] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Wykrywa duplikaty wartości w wskazanej kolumnie arkusza.
+    
+    Args:
+        drive_service: Obiekt serwisu Google Drive API
+        sheets_service: Obiekt serwisu Google Sheets API
+        spreadsheet_id: ID arkusza kalkulacyjnego
+        sheet_name: Nazwa zakładki
+        search_column_name: Nazwa kolumny do analizy duplikatów
+        normalize: Czy normalizować wartości (strip, lowercase, normalize_number_string)
+        spreadsheet_name: Opcjonalna nazwa arkusza (unika dodatkowego wywołania API)
+        stop_event: Opcjonalny obiekt threading.Event do sygnalizowania zatrzymania
+    
+    Returns:
+        Lista obiektów reprezentujących znalezione duplikaty:
+        {
+            "spreadsheetId": str,
+            "spreadsheetName": str,
+            "sheetName": str,
+            "columnName": str,
+            "value": str,
+            "count": int,
+            "rows": [int],  # 1-based row indices
+            "sample_cells": [str]  # raw cell values
+        }
+        Pusta lista jeśli kolumna nie istnieje lub brak duplikatów.
+    """
+    # Check stop_event at the start
+    if stop_event is not None and stop_event.is_set():
+        return []
+    
+    # Użyj przekazanej nazwy arkusza lub pobierz ją z API
+    if spreadsheet_name is None:
+        try:
+            meta = sheets_service.spreadsheets().get(
+                spreadsheetId=spreadsheet_id, fields="properties.title"
+            ).execute()
+            spreadsheet_name = meta.get("properties", {}).get("title", "")
+        except Exception as e:
+            logger.warning(f"Nie można pobrać nazwy arkusza [{spreadsheet_id}]: {e}")
+            spreadsheet_name = spreadsheet_id
+    
+    # Pobierz wartości z wybranej zakładki
+    try:
+        resp = sheets_service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=sheet_name,
+            majorDimension="ROWS"
+        ).execute()
+        values = resp.get("values", [])
+    except Exception as e:
+        logger.error(f"Błąd pobierania danych z arkusza [{spreadsheet_name}] {sheet_name}: {e}")
+        return []
+    
+    if not values:
+        return []
+    
+    # Wykryj wiersz nagłówków
+    header_row_idx, header_row, start_row = detect_header_row(values, search_column_name)
+    
+    if header_row is None:
+        logger.debug(f"Brak wiersza nagłówków w [{spreadsheet_name}] {sheet_name}")
+        return []
+    
+    # Znajdź indeks kolumny
+    target_col_idx = find_column_index_by_name(header_row, search_column_name)
+    
+    if target_col_idx is None:
+        logger.debug(f"Kolumna '{search_column_name}' nie istnieje w [{spreadsheet_name}] {sheet_name}")
+        return []
+    
+    # Słownik do zbierania wartości: normalized_value -> [(row_index_1based, raw_value), ...]
+    value_occurrences: Dict[str, List[Tuple[int, str]]] = {}
+    
+    # Iteruj przez wiersze danych
+    for r_idx in range(start_row, len(values)):
+        # Check stop_event periodically
+        if stop_event is not None and stop_event.is_set():
+            return []
+        
+        row = values[r_idx]
+        if row is None:
+            continue
+        
+        try:
+            cell_value = get_cell_value_safe(row, target_col_idx)
+            if cell_value is None or cell_value.strip() == "":
+                continue
+            
+            raw_value = cell_value
+            
+            # Normalizuj wartość
+            if normalize:
+                # Dla liczb użyj normalize_number_string
+                normalized = normalize_number_string(cell_value)
+                if not normalized:
+                    # Dla tekstu: strip + lowercase
+                    normalized = cell_value.strip().lower()
+            else:
+                normalized = cell_value
+            
+            # 1-based row index (API zwraca 0-based, ale wyświetlamy 1-based)
+            row_1based = r_idx + 1
+            
+            if normalized not in value_occurrences:
+                value_occurrences[normalized] = []
+            value_occurrences[normalized].append((row_1based, raw_value))
+            
+        except Exception as e:
+            logger.warning(
+                f"Błąd przetwarzania wiersza [{spreadsheet_name}] {sheet_name}!{r_idx+1}: {e}"
+            )
+            continue
+    
+    # Filtruj tylko duplikaty (count > 1)
+    duplicates = []
+    for normalized_value, occurrences in value_occurrences.items():
+        if len(occurrences) > 1:
+            rows = [occ[0] for occ in occurrences]
+            sample_cells = [occ[1] for occ in occurrences[:5]]  # Max 5 przykładów
+            
+            # Użyj oryginalnej wartości z pierwszego wystąpienia
+            display_value = occurrences[0][1]
+            
+            duplicates.append({
+                "spreadsheetId": spreadsheet_id,
+                "spreadsheetName": spreadsheet_name,
+                "sheetName": sheet_name,
+                "columnName": search_column_name,
+                "value": display_value,
+                "count": len(occurrences),
+                "rows": rows,
+                "sample_cells": sample_cells,
+            })
+    
+    return duplicates
+
+
+def find_duplicates_across_spreadsheets(
+    drive_service,
+    sheets_service,
+    spreadsheet_ids: Optional[List[str]],
+    search_column_name: str,
+    normalize: bool = True,
+    stop_event: Optional[threading.Event] = None,
+) -> Generator[Dict[str, Any], None, None]:
+    """
+    Wykrywa duplikaty wartości w wskazanej kolumnie we wielu arkuszach.
+    
+    Iteruje po podanych arkuszach (lub wszystkich arkuszach użytkownika jeśli
+    spreadsheet_ids jest None) i używa find_duplicates_in_sheet dla każdego.
+    
+    Args:
+        drive_service: Obiekt serwisu Google Drive API
+        sheets_service: Obiekt serwisu Google Sheets API
+        spreadsheet_ids: Lista ID arkuszy do przeszukania lub None (wszystkie)
+        search_column_name: Nazwa kolumny do analizy duplikatów
+        normalize: Czy normalizować wartości
+        stop_event: Opcjonalny obiekt threading.Event do sygnalizowania zatrzymania
+    
+    Yields:
+        Wyniki w formacie:
+        {
+            "spreadsheetId": str,
+            "spreadsheetName": str,
+            "sheetName": str,
+            "columnName": str,
+            "value": str,
+            "count": int,
+            "rows": [int],
+            "sample_cells": [str]
+        }
+    """
+    # Check stop_event at the start
+    if stop_event is not None and stop_event.is_set():
+        return
+    
+    # Pobierz listę arkuszy do przeszukania
+    if spreadsheet_ids is None:
+        try:
+            files = list_spreadsheets_owned_by_me(drive_service)
+            spreadsheet_list = [(f["id"], f.get("name", "")) for f in files]
+        except Exception as e:
+            logger.error(f"Błąd pobierania listy arkuszy: {e}")
+            return
+    else:
+        spreadsheet_list = [(sid, "") for sid in spreadsheet_ids]
+    
+    # Iteruj po wszystkich arkuszach
+    for spreadsheet_id, spreadsheet_name in spreadsheet_list:
+        # Check stop_event before processing each spreadsheet
+        if stop_event is not None and stop_event.is_set():
+            return
+        
+        try:
+            # Pobierz metadane arkusza (nazwy zakładek)
+            meta = sheets_service.spreadsheets().get(
+                spreadsheetId=spreadsheet_id, fields="properties.title,sheets.properties"
+            ).execute()
+            
+            if not spreadsheet_name:
+                spreadsheet_name = meta.get("properties", {}).get("title", spreadsheet_id)
+            
+            sheets = meta.get("sheets", [])
+            
+            # Iteruj po wszystkich zakładkach
+            for sh in sheets:
+                # Check stop_event before processing each sheet
+                if stop_event is not None and stop_event.is_set():
+                    return
+                
+                sheet_name = sh["properties"]["title"]
+                
+                # Znajdź duplikaty w tej zakładce
+                duplicates = find_duplicates_in_sheet(
+                    drive_service,
+                    sheets_service,
+                    spreadsheet_id=spreadsheet_id,
+                    sheet_name=sheet_name,
+                    search_column_name=search_column_name,
+                    normalize=normalize,
+                    spreadsheet_name=spreadsheet_name,
+                    stop_event=stop_event,
+                )
+                
+                # Yield każdy duplikat
+                for dup in duplicates:
+                    if stop_event is not None and stop_event.is_set():
+                        return
+                    yield dup
+                    
+        except Exception as e:
+            logger.warning(f"Błąd przetwarzania arkusza [{spreadsheet_id}]: {e}")
             continue

@@ -18,6 +18,8 @@ from sheets_search import (
     search_in_sheet,
     search_in_spreadsheet,
     search_across_spreadsheets,
+    find_duplicates_in_sheet,
+    find_duplicates_across_spreadsheets,
     ALL_COLUMNS_VALUES,
 )
 
@@ -35,6 +37,9 @@ EVENT_SS_FILES_LOADED = "-SS_FILES_LOADED-"
 EVENT_SS_SHEETS_LOADED = "-SS_SHEETS_LOADED-"
 EVENT_SS_SEARCH_RESULT = "-SS_SEARCH_RESULT-"
 EVENT_SS_SEARCH_DONE = "-SS_SEARCH_DONE-"
+# Events for duplicate detection
+EVENT_DUP_RESULT = "-DUP_RESULT-"
+EVENT_DUP_DONE = "-DUP_DONE-"
 
 # -------------------- Global state --------------------
 drive_service = None
@@ -47,6 +52,9 @@ ss_current_spreadsheets = []
 ss_current_sheets = []
 ss_search_thread = None
 ss_stop_search_flag = threading.Event()
+# Global state for duplicate detection
+dup_search_thread = None
+dup_stop_search_flag = threading.Event()
 
 
 # -------------------- Helper functions --------------------
@@ -67,6 +75,23 @@ def format_ss_result_for_table(result: dict) -> list:
         result.get('sheetName', ''),
         result.get('searchedValue', ''),
         result.get('stawka', ''),
+    ]
+
+
+def format_dup_result_for_table(result: dict) -> list:
+    """Format a duplicate result as table row [Arkusz, Kolumna, Wartość, Ile razy, Przykładowe wiersze]."""
+    rows = result.get('rows', [])
+    # Show first 5 row numbers as example
+    example_rows = ', '.join(str(r) for r in rows[:5])
+    if len(rows) > 5:
+        example_rows += f'... (+{len(rows) - 5})'
+    
+    return [
+        f"{result.get('spreadsheetName', '')} / {result.get('sheetName', '')}",
+        result.get('columnName', ''),
+        result.get('value', ''),
+        str(result.get('count', 0)),
+        example_rows,
     ]
 
 
@@ -287,6 +312,110 @@ def ss_search_all_spreadsheets_thread_func(window, pattern, regex, case_sensitiv
         window.write_event_value(EVENT_SS_SEARCH_DONE, "error")
 
 
+# -------------------- Duplicate Detection Thread Functions --------------------
+def dup_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, search_column_name, all_sheets=False):
+    """Run duplicate detection in a single sheet or all sheets in background thread."""
+    global dup_stop_search_flag
+    try:
+        if sheets_service is None:
+            window.write_event_value(EVENT_ERROR, "Najpierw zaloguj się.")
+            return
+
+        dup_stop_search_flag.clear()
+        
+        if all_sheets:
+            # Get all sheets in the spreadsheet
+            try:
+                meta = sheets_service.spreadsheets().get(
+                    spreadsheetId=spreadsheet_id, fields="sheets.properties"
+                ).execute()
+                sheets = meta.get("sheets", [])
+            except Exception as e:
+                window.write_event_value(EVENT_ERROR, f"Błąd pobierania zakładek: {e}")
+                window.write_event_value(EVENT_DUP_DONE, "error")
+                return
+            
+            for sh in sheets:
+                if dup_stop_search_flag.is_set():
+                    window.write_event_value(EVENT_DUP_DONE, "stopped")
+                    return
+                
+                sheet_title = sh["properties"]["title"]
+                duplicates = find_duplicates_in_sheet(
+                    drive_service,
+                    sheets_service,
+                    spreadsheet_id=spreadsheet_id,
+                    sheet_name=sheet_title,
+                    search_column_name=search_column_name,
+                    normalize=True,
+                    spreadsheet_name=spreadsheet_name,
+                    stop_event=dup_stop_search_flag,
+                )
+                
+                for dup in duplicates:
+                    if dup_stop_search_flag.is_set():
+                        window.write_event_value(EVENT_DUP_DONE, "stopped")
+                        return
+                    window.write_event_value(EVENT_DUP_RESULT, dup)
+        else:
+            # Search in a single sheet
+            duplicates = find_duplicates_in_sheet(
+                drive_service,
+                sheets_service,
+                spreadsheet_id=spreadsheet_id,
+                sheet_name=sheet_name,
+                search_column_name=search_column_name,
+                normalize=True,
+                spreadsheet_name=spreadsheet_name,
+                stop_event=dup_stop_search_flag,
+            )
+            
+            for dup in duplicates:
+                if dup_stop_search_flag.is_set():
+                    window.write_event_value(EVENT_DUP_DONE, "stopped")
+                    return
+                window.write_event_value(EVENT_DUP_RESULT, dup)
+
+        window.write_event_value(EVENT_DUP_DONE, "completed")
+
+    except Exception as e:
+        window.write_event_value(EVENT_ERROR, f"Błąd wykrywania duplikatów: {e}")
+        window.write_event_value(EVENT_DUP_DONE, "error")
+
+
+def dup_search_all_spreadsheets_thread_func(window, search_column_name):
+    """Run duplicate detection across all user's spreadsheets in background thread."""
+    global dup_stop_search_flag
+    try:
+        if drive_service is None or sheets_service is None:
+            window.write_event_value(EVENT_ERROR, "Najpierw zaloguj się.")
+            return
+
+        dup_stop_search_flag.clear()
+        
+        # Find duplicates across all spreadsheets
+        results_gen = find_duplicates_across_spreadsheets(
+            drive_service,
+            sheets_service,
+            spreadsheet_ids=None,  # None means all spreadsheets
+            search_column_name=search_column_name,
+            normalize=True,
+            stop_event=dup_stop_search_flag,
+        )
+
+        for result in results_gen:
+            if dup_stop_search_flag.is_set():
+                window.write_event_value(EVENT_DUP_DONE, "stopped")
+                return
+            window.write_event_value(EVENT_DUP_RESULT, result)
+
+        window.write_event_value(EVENT_DUP_DONE, "completed")
+
+    except Exception as e:
+        window.write_event_value(EVENT_ERROR, f"Błąd wykrywania duplikatów: {e}")
+        window.write_event_value(EVENT_DUP_DONE, "error")
+
+
 # -------------------- GUI Layout --------------------
 def create_auth_tab():
     """Create Authorization tab layout."""
@@ -346,6 +475,8 @@ def create_single_sheet_search_tab():
     """Create Single Sheet Search tab layout."""
     # Definicja kolumn tabeli wyników
     table_headings = ["Arkusz kalkulacyjny", "Zakładka", "Zlecenie", "Stawka"]
+    # Definicja kolumn tabeli duplikatów
+    dup_table_headings = ["Arkusz", "Kolumna", "Wartość", "Ile razy", "Przykładowe wiersze"]
     
     return [
         [sg.Text("Przeszukiwanie pojedynczego arkusza", font=("Helvetica", 12, "bold"))],
@@ -360,23 +491,43 @@ def create_single_sheet_search_tab():
         [sg.HorizontalSeparator()],
         [sg.Text("Zapytanie:"), sg.Input(key="-SHEET_QUERY-", expand_x=True)],
         [sg.Checkbox("Regex", key="-SHEET_REGEX-"), sg.Checkbox("Rozróżniaj wielkość liter", key="-SHEET_CASE-")],
-        [sg.Button("Szukaj", key="-SHEET_SEARCH_BTN-"), sg.Button("Zatrzymaj", key="-SHEET_SEARCH_STOP-", disabled=True)],
+        [
+            sg.Button("Szukaj", key="-SHEET_SEARCH_BTN-"),
+            sg.Button("Znajdź duplikaty", key="-DUP_SEARCH_BTN-"),
+            sg.Button("Zatrzymaj", key="-SHEET_SEARCH_STOP-", disabled=True)
+        ],
         [sg.HorizontalSeparator()],
-        [sg.Text("Wyniki:", font=("Helvetica", 10, "bold"))],
+        [sg.Text("Wyniki wyszukiwania:", font=("Helvetica", 10, "bold"))],
         [sg.Table(
             values=[],
             headings=table_headings,
             key="-SHEET_RESULTS_TABLE-",
             auto_size_columns=True,
             justification='left',
-            num_rows=15,
+            num_rows=10,
             expand_x=True,
-            expand_y=True,
+            expand_y=False,
             enable_events=False,
             vertical_scroll_only=False,
         )],
         [sg.Text("Znaleziono: 0", key="-SS_SEARCH_COUNT-")],
         [sg.Button("Wyczyść wyniki", key="-SS_CLEAR_RESULTS-"), sg.Button("Zapisz do JSON", key="-SHEET_SAVE_RESULTS-")],
+        [sg.HorizontalSeparator()],
+        [sg.Text("Wyniki duplikatów:", font=("Helvetica", 10, "bold"))],
+        [sg.Table(
+            values=[],
+            headings=dup_table_headings,
+            key="-DUP_RESULTS_TABLE-",
+            auto_size_columns=True,
+            justification='left',
+            num_rows=10,
+            expand_x=True,
+            expand_y=True,
+            enable_events=False,
+            vertical_scroll_only=False,
+        )],
+        [sg.Text("Znaleziono duplikatów: 0", key="-DUP_SEARCH_COUNT-")],
+        [sg.Button("Wyczyść duplikaty", key="-DUP_CLEAR_RESULTS-"), sg.Button("Zapisz duplikaty do JSON", key="-DUP_SAVE_RESULTS-")],
     ]
 
 
@@ -398,7 +549,7 @@ def create_layout():
 # -------------------- Main GUI loop --------------------
 def main():
     """Main function - runs the GUI event loop."""
-    global drive_service, sheets_service, search_thread, ss_search_thread
+    global drive_service, sheets_service, search_thread, ss_search_thread, dup_search_thread
 
     sg.theme("SystemDefault")
 
@@ -418,6 +569,10 @@ def main():
     ss_table_data = []  # Data for the results table [Arkusz, Zlecenie, Stawka]
     ss_current_spreadsheet_id = None
     ss_current_spreadsheet_name = None
+
+    # State for duplicate detection
+    dup_results_list = []
+    dup_table_data = []  # Data for the duplicates table
 
     # Update token status on startup
     window["-TOKEN_EXISTS-"].update("Tak" if os.path.exists(TOKEN_FILE) else "Nie")
@@ -756,6 +911,7 @@ def main():
 
         elif event == "-SHEET_SEARCH_STOP-":
             ss_stop_search_flag.set()
+            dup_stop_search_flag.set()
             window["-STATUS_BAR-"].update("Zatrzymywanie wyszukiwania...")
 
         elif event == EVENT_SS_SEARCH_RESULT:
@@ -810,6 +966,149 @@ def main():
                             f.write(json.dumps(export_obj, ensure_ascii=False) + "\n")
                     sg.popup(f"Zapisano {len(ss_search_results_list)} wyników do:\n{filename}", title="Zapisano")
                     window["-STATUS_BAR-"].update(f"Wyniki zapisane do: {filename}")
+                except Exception as e:
+                    sg.popup_error(f"Błąd zapisu: {e}")
+
+        # -------------------- Duplicate Detection Events --------------------
+        elif event == "-DUP_SEARCH_BTN-":
+            column_input_value = values["-SHEET_COLUMN_INPUT-"].strip()
+            if not column_input_value:
+                sg.popup_error("Podaj nazwę kolumny do analizy duplikatów.")
+                continue
+
+            if sheets_service is None:
+                sg.popup_error("Najpierw zaloguj się (zakładka Autoryzacja).")
+                continue
+
+            select_all_spreadsheets = values["-SSPREADSHEETS_SELECT_ALL-"]
+            selected_spreadsheet = values["-SSPREADSHEETS_DROPDOWN-"]
+            all_sheets_mode = values["-SHEET_ALL_SHEETS-"]
+
+            # When not selecting all spreadsheets, validate spreadsheet selection
+            if not select_all_spreadsheets:
+                if not selected_spreadsheet:
+                    sg.popup_error("Wybierz arkusz z listy lub zaznacz 'Wybierz wszystkie arkusze'.")
+                    continue
+
+            # Clear previous duplicate results
+            dup_results_list.clear()
+            dup_table_data.clear()
+            window["-DUP_RESULTS_TABLE-"].update(values=[])
+            window["-DUP_SEARCH_COUNT-"].update("Znaleziono duplikatów: 0")
+
+            # Disable search buttons, enable stop
+            window["-SHEET_SEARCH_BTN-"].update(disabled=True)
+            window["-DUP_SEARCH_BTN-"].update(disabled=True)
+            window["-SHEET_SEARCH_STOP-"].update(disabled=False)
+
+            if select_all_spreadsheets:
+                # Detect duplicates across all spreadsheets
+                window["-STATUS_BAR-"].update("Trwa wykrywanie duplikatów we wszystkich arkuszach...")
+                dup_search_thread = threading.Thread(
+                    target=dup_search_all_spreadsheets_thread_func,
+                    args=(
+                        window,
+                        column_input_value
+                    ),
+                    daemon=True
+                )
+            else:
+                # Get spreadsheet info for single spreadsheet search
+                try:
+                    combo_values = window["-SSPREADSHEETS_DROPDOWN-"].Values
+                    idx = combo_values.index(selected_spreadsheet)
+                    file_info = ss_current_spreadsheets[idx]
+                    spreadsheet_id = file_info["id"]
+                    spreadsheet_name = file_info["name"]
+                except (ValueError, IndexError):
+                    sg.popup_error("Błąd: nie można znaleźć wybranego arkusza.")
+                    window["-SHEET_SEARCH_BTN-"].update(disabled=False)
+                    window["-DUP_SEARCH_BTN-"].update(disabled=False)
+                    window["-SHEET_SEARCH_STOP-"].update(disabled=True)
+                    continue
+
+                selected_sheet = values["-SSHEETS_DROPDOWN-"]
+                
+                if all_sheets_mode:
+                    window["-STATUS_BAR-"].update(f"Trwa wykrywanie duplikatów we wszystkich zakładkach: {spreadsheet_name}...")
+                else:
+                    if not selected_sheet:
+                        sg.popup_error("Wybierz zakładkę z listy lub zaznacz 'Wybierz wszystkie'.")
+                        window["-SHEET_SEARCH_BTN-"].update(disabled=False)
+                        window["-DUP_SEARCH_BTN-"].update(disabled=False)
+                        window["-SHEET_SEARCH_STOP-"].update(disabled=True)
+                        continue
+                    window["-STATUS_BAR-"].update(f"Trwa wykrywanie duplikatów w: {spreadsheet_name} / {selected_sheet}...")
+
+                dup_search_thread = threading.Thread(
+                    target=dup_search_thread_func,
+                    args=(
+                        window,
+                        spreadsheet_id,
+                        spreadsheet_name,
+                        selected_sheet,
+                        column_input_value,
+                        all_sheets_mode
+                    ),
+                    daemon=True
+                )
+            dup_search_thread.start()
+
+        elif event == EVENT_DUP_RESULT:
+            result = values[EVENT_DUP_RESULT]
+            dup_results_list.append(result)
+            table_row = format_dup_result_for_table(result)
+            dup_table_data.append(table_row)
+            window["-DUP_RESULTS_TABLE-"].update(values=dup_table_data)
+            window["-DUP_SEARCH_COUNT-"].update(f"Znaleziono duplikatów: {len(dup_results_list)}")
+
+        elif event == EVENT_DUP_DONE:
+            status = values[EVENT_DUP_DONE]
+            window["-SHEET_SEARCH_BTN-"].update(disabled=False)
+            window["-DUP_SEARCH_BTN-"].update(disabled=False)
+            window["-SHEET_SEARCH_STOP-"].update(disabled=True)
+            if status == "completed":
+                window["-STATUS_BAR-"].update(f"Wykrywanie duplikatów zakończone. Znaleziono: {len(dup_results_list)}")
+            elif status == "stopped":
+                window["-STATUS_BAR-"].update(f"Wykrywanie duplikatów zatrzymane. Znaleziono: {len(dup_results_list)}")
+            else:
+                window["-STATUS_BAR-"].update("Wykrywanie duplikatów zakończone z błędem.")
+
+        elif event == "-DUP_CLEAR_RESULTS-":
+            dup_results_list.clear()
+            dup_table_data.clear()
+            window["-DUP_RESULTS_TABLE-"].update(values=[])
+            window["-DUP_SEARCH_COUNT-"].update("Znaleziono duplikatów: 0")
+            window["-STATUS_BAR-"].update("Wyniki duplikatów wyczyszczone.")
+
+        elif event == "-DUP_SAVE_RESULTS-":
+            if not dup_results_list:
+                sg.popup("Brak duplikatów do zapisania.", title="Zapisz do JSON")
+                continue
+            filename = sg.popup_get_file(
+                "Zapisz duplikaty do pliku JSON",
+                save_as=True,
+                default_extension=".json",
+                file_types=(("JSON Files", "*.json"), ("All Files", "*.*")),
+            )
+            if filename:
+                try:
+                    with open(filename, "w", encoding="utf-8") as f:
+                        # Zapisz każdy wynik jako osobny JSON obiekt w linii (NDJSON format)
+                        for result in dup_results_list:
+                            export_obj = {
+                                "spreadsheetId": result.get("spreadsheetId", ""),
+                                "spreadsheetName": result.get("spreadsheetName", ""),
+                                "sheetName": result.get("sheetName", ""),
+                                "columnName": result.get("columnName", ""),
+                                "value": result.get("value", ""),
+                                "count": result.get("count", 0),
+                                "rows": result.get("rows", []),
+                                "sample_cells": result.get("sample_cells", []),
+                            }
+                            f.write(json.dumps(export_obj, ensure_ascii=False) + "\n")
+                    sg.popup(f"Zapisano {len(dup_results_list)} duplikatów do:\n{filename}", title="Zapisano")
+                    window["-STATUS_BAR-"].update(f"Duplikaty zapisane do: {filename}")
                 except Exception as e:
                     sg.popup_error(f"Błąd zapisu: {e}")
 
