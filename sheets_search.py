@@ -26,7 +26,8 @@ Nowa funkcjonalność:
 import logging
 import re
 import threading
-from typing import List, Dict, Any, Generator, Optional, Union
+from collections import Counter
+from typing import List, Dict, Any, Generator, Optional, Union, Tuple
 
 # Konfiguracja loggera dla modułu
 logger = logging.getLogger(__name__)
@@ -1006,8 +1007,6 @@ def find_duplicates_in_sheet(
         }
         Pusta lista jeśli kolumna nie istnieje lub brak duplikatów.
     """
-    from collections import Counter
-    
     # Check stop_event at the start
     if stop_event is not None and stop_event.is_set():
         return []
@@ -1053,7 +1052,7 @@ def find_duplicates_in_sheet(
         return []
     
     # Słownik do zbierania wartości: normalized_value -> [(row_index_1based, raw_value), ...]
-    value_occurrences: Dict[str, List[tuple]] = {}
+    value_occurrences: Dict[str, List[Tuple[int, str]]] = {}
     
     # Iteruj przez wiersze danych
     for r_idx in range(start_row, len(values)):

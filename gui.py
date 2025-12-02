@@ -491,7 +491,11 @@ def create_single_sheet_search_tab():
         [sg.HorizontalSeparator()],
         [sg.Text("Zapytanie:"), sg.Input(key="-SHEET_QUERY-", expand_x=True)],
         [sg.Checkbox("Regex", key="-SHEET_REGEX-"), sg.Checkbox("Rozróżniaj wielkość liter", key="-SHEET_CASE-")],
-        [sg.Button("Szukaj", key="-SHEET_SEARCH_BTN-"), sg.Button("Znajdź duplikaty", key="-DUP_SEARCH_BTN-"), sg.Button("Zatrzymaj", key="-SHEET_SEARCH_STOP-", disabled=True)],
+        [
+            sg.Button("Szukaj", key="-SHEET_SEARCH_BTN-"),
+            sg.Button("Znajdź duplikaty", key="-DUP_SEARCH_BTN-"),
+            sg.Button("Zatrzymaj", key="-SHEET_SEARCH_STOP-", disabled=True)
+        ],
         [sg.HorizontalSeparator()],
         [sg.Text("Wyniki wyszukiwania:", font=("Helvetica", 10, "bold"))],
         [sg.Table(
