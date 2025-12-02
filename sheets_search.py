@@ -23,6 +23,7 @@ Nowa funkcjonalność:
 
 import logging
 import re
+import threading
 from typing import List, Dict, Any, Generator, Optional, Union
 
 # Konfiguracja loggera dla modułu
@@ -452,6 +453,7 @@ def search_in_spreadsheets(
     regex: bool = False,
     case_sensitive: bool = False,
     max_files: Optional[int] = None,
+    stop_event: Optional[threading.Event] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Przeszukuje wszystkie arkusze należące do użytkownika wg pattern.
@@ -482,6 +484,9 @@ def search_in_spreadsheets(
     digit_pattern = re.compile(r"\d")  # Pre-compiled regex for digit detection
 
     for f in files:
+        # Check stop_event before processing each file
+        if stop_event is not None and stop_event.is_set():
+            return
         sid = f["id"]
         sname = f.get("name", "")
         # pobierz metadane arkusza (nazwy zakładek)
@@ -492,6 +497,9 @@ def search_in_spreadsheets(
             continue
         sheets = meta.get("sheets", [])
         for sh in sheets:
+            # Check stop_event before processing each sheet
+            if stop_event is not None and stop_event.is_set():
+                return
             title = sh["properties"]["title"]
             # odczytaj wszystkie wartości z zakładki (range = title)
             try:
@@ -500,6 +508,9 @@ def search_in_spreadsheets(
             except Exception:
                 continue
             for r_idx, row in enumerate(values):
+                # Check stop_event periodically during row iteration
+                if stop_event is not None and stop_event.is_set():
+                    return
                 if row is None:
                     continue
                 for c_idx, cell in enumerate(row):
@@ -563,6 +574,7 @@ def search_in_spreadsheet(
     regex: bool = False,
     case_sensitive: bool = False,
     search_column_name: Optional[str] = None,
+    stop_event: Optional[threading.Event] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Przeszukuje wszystkie zakładki w konkretnym arkuszu wg pattern.
@@ -575,6 +587,7 @@ def search_in_spreadsheet(
         regex: Czy użyć wyrażenia regularnego
         case_sensitive: Czy rozróżniać wielkość liter
         search_column_name: Nazwa kolumny do przeszukania lub 'ALL'/'Wszystkie'
+        stop_event: Opcjonalny obiekt threading.Event do sygnalizowania zatrzymania
     
     Zwraca generator wyników w formacie:
     {
@@ -589,6 +602,10 @@ def search_in_spreadsheet(
     Wykorzystuje tę samą normalizację liczb co search_in_spreadsheets.
     Odporność na None/nieoczekiwane typy, przechwytuje błędy per-komórka.
     """
+    # Check stop_event at the start
+    if stop_event is not None and stop_event.is_set():
+        return
+    
     # Pobierz nazwę arkusza z metadanych
     spreadsheet_name = ""
     try:
@@ -603,6 +620,9 @@ def search_in_spreadsheet(
 
     # Przeszukaj każdą zakładkę
     for sh in sheets:
+        # Check stop_event before processing each sheet
+        if stop_event is not None and stop_event.is_set():
+            return
         sheet_name = sh["properties"]["title"]
         yield from search_in_sheet(
             drive_service,
@@ -614,6 +634,7 @@ def search_in_spreadsheet(
             case_sensitive=case_sensitive,
             search_column_name=search_column_name,
             spreadsheet_name=spreadsheet_name,
+            stop_event=stop_event,
         )
 
 
@@ -627,6 +648,7 @@ def search_in_sheet(
     case_sensitive: bool = False,
     search_column_name: Optional[str] = None,
     spreadsheet_name: Optional[str] = None,
+    stop_event: Optional[threading.Event] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Przeszukuje tylko wybraną zakładkę w konkretnym arkuszu wg pattern.
@@ -644,6 +666,7 @@ def search_in_sheet(
             - Jeśli konkretna nazwa - przeszukuj tylko tę kolumnę
             - Jeśli None - tryb strict: przeszukuj tylko kolumnę 'numer zlecenia'
         spreadsheet_name: Opcjonalna nazwa arkusza (unika dodatkowego wywołania API)
+        stop_event: Opcjonalny obiekt threading.Event do sygnalizowania zatrzymania
     
     Zwraca generator wyników w formacie:
     {
@@ -676,6 +699,10 @@ def search_in_sheet(
     Obsługuje URL-e (wyciąga numeric tokens).
     Odporność na None/nieoczekiwane typy, przechwytuje błędy per-komórka.
     """
+    # Check stop_event at the start
+    if stop_event is not None and stop_event.is_set():
+        return
+    
     # Użyj przekazanej nazwy arkusza lub pobierz ją z API
     if spreadsheet_name is None:
         try:
@@ -793,6 +820,9 @@ def search_in_sheet(
     if search_all:
         # Tryb 'ALL' - przeszukuj wszystkie kolumny
         for r_idx in range(start_row, len(values)):
+            # Check stop_event periodically during row iteration
+            if stop_event is not None and stop_event.is_set():
+                return
             row = values[r_idx]
             if row is None:
                 continue
@@ -825,6 +855,9 @@ def search_in_sheet(
     else:
         # Tryb konkretnej kolumny (target_col_idx jest ustawiony)
         for r_idx in range(start_row, len(values)):
+            # Check stop_event periodically during row iteration
+            if stop_event is not None and stop_event.is_set():
+                return
             row = values[r_idx]
             if row is None:
                 continue
@@ -859,6 +892,7 @@ def search_across_spreadsheets(
     case_sensitive: bool = False,
     search_column_name: Optional[str] = None,
     spreadsheet_ids: Optional[List[str]] = None,
+    stop_event: Optional[threading.Event] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Przeszukuje wiele arkuszy kalkulacyjnych wg pattern.
@@ -878,6 +912,7 @@ def search_across_spreadsheets(
         case_sensitive: Czy rozróżniać wielkość liter
         search_column_name: Nazwa kolumny do przeszukania lub 'ALL'/'Wszystkie'
         spreadsheet_ids: Lista ID arkuszy do przeszukania lub None (wszystkie)
+        stop_event: Opcjonalny obiekt threading.Event do sygnalizowania zatrzymania
     
     Yields:
         Wyniki w formacie:
@@ -890,6 +925,10 @@ def search_across_spreadsheets(
           "stawka": "..."
         }
     """
+    # Check stop_event at the start
+    if stop_event is not None and stop_event.is_set():
+        return
+    
     # Pobierz listę arkuszy do przeszukania
     if spreadsheet_ids is None:
         try:
@@ -903,6 +942,9 @@ def search_across_spreadsheets(
     
     # Iteruj po wszystkich arkuszach
     for spreadsheet_id, spreadsheet_name in spreadsheet_list:
+        # Check stop_event before processing each spreadsheet
+        if stop_event is not None and stop_event.is_set():
+            return
         try:
             results_gen = search_in_spreadsheet(
                 drive_service,
@@ -912,8 +954,12 @@ def search_across_spreadsheets(
                 regex=regex,
                 case_sensitive=case_sensitive,
                 search_column_name=search_column_name,
+                stop_event=stop_event,
             )
             for result in results_gen:
+                # Check stop_event after each result
+                if stop_event is not None and stop_event.is_set():
+                    return
                 yield result
         except Exception as e:
             # Błąd przy jednym arkuszu nie przerywa całego procesu

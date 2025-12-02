@@ -151,6 +151,7 @@ def search_thread_func(window, pattern, regex, case_sensitive, max_files):
             regex=regex,
             case_sensitive=case_sensitive,
             max_files=max_files if max_files > 0 else None,
+            stop_event=stop_search_flag,
         )
 
         for result in results_gen:
@@ -222,6 +223,7 @@ def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, 
                 regex=regex,
                 case_sensitive=case_sensitive,
                 search_column_name=search_column_name,
+                stop_event=ss_stop_search_flag,
             )
         else:
             # Search in a single sheet
@@ -234,6 +236,7 @@ def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, 
                 regex=regex,
                 case_sensitive=case_sensitive,
                 search_column_name=search_column_name,
+                stop_event=ss_stop_search_flag,
             )
 
         for result in results_gen:
@@ -268,6 +271,7 @@ def ss_search_all_spreadsheets_thread_func(window, pattern, regex, case_sensitiv
             case_sensitive=case_sensitive,
             search_column_name=search_column_name,
             spreadsheet_ids=None,  # None means search all spreadsheets
+            stop_event=ss_stop_search_flag,
         )
 
         for result in results_gen:
