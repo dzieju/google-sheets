@@ -6,6 +6,7 @@ Funkcje:
 - search_in_sheet(drive_service, sheets_service, spreadsheet_id, sheet_name, pattern, regex=False, case_sensitive=False, search_column_name=None)
 - search_in_spreadsheet(drive_service, sheets_service, spreadsheet_id, pattern, regex=False, case_sensitive=False, search_column_name=None)
 - get_sheet_headers(sheets_service, spreadsheet_id, sheet_name)
+- detect_header_row(values, search_column_name=None)
 
 Poprawka: normalizacja ciągów liczbowych, aby wyszukiwanie znajdowało liczby pomimo różnego formatowania (spacje, NBSP, separatory tysięcy, przecinek/kropka).
 Dodatkowa odporność na wartości None i typy numeryczne (int/float).
@@ -16,6 +17,8 @@ Nowa funkcjonalność:
 - Fallback: jeśli brak nagłówków, stawka z komórki po prawej
 - Obsługa parametru search_column_name: 'ALL'/'Wszystkie' przeszukuje wszystkie kolumny,
   konkretna nazwa kolumny przeszukuje tylko tę kolumnę, brak wartości przeszukuje 'numer zlecenia'
+- Wykrywanie nagłówków w wierszu 1 lub 2: jeśli szukana kolumna nie znajduje się w wierszu 1,
+  algorytm sprawdza również wiersz 2 i odpowiednio dostosowuje indeks początkowy danych
 """
 
 import logging
@@ -159,7 +162,8 @@ def is_search_all_columns(search_column_name: Optional[str]) -> bool:
 
 def get_sheet_headers(sheets_service, spreadsheet_id: str, sheet_name: str) -> List[str]:
     """
-    Pobiera nagłówki (pierwszy wiersz) z arkusza.
+    Pobiera nagłówki z arkusza - najpierw z wiersza 1, a jeśli pusty lub nie wygląda jak nagłówek,
+    to z wiersza 2.
     
     Args:
         sheets_service: Obiekt serwisu Google Sheets API
@@ -170,20 +174,97 @@ def get_sheet_headers(sheets_service, spreadsheet_id: str, sheet_name: str) -> L
         Lista nagłówków kolumn (puste stringi dla pustych komórek)
     """
     try:
-        # Pobierz tylko pierwszy wiersz
+        # Pobierz pierwsze dwa wiersze, żeby sprawdzić oba
         resp = sheets_service.spreadsheets().values().get(
             spreadsheetId=spreadsheet_id,
-            range=f"{sheet_name}!1:1",
+            range=f"{sheet_name}!1:2",
             majorDimension="ROWS"
         ).execute()
         values = resp.get("values", [])
-        if values and len(values) > 0:
-            # Konwertuj wszystkie wartości do stringów
-            return [str(cell) if cell is not None else "" for cell in values[0]]
-        return []
+        
+        if not values:
+            return []
+        
+        # Sprawdź wiersz 1
+        row1 = values[0] if len(values) > 0 else []
+        if row1 and is_likely_header_row(row1):
+            return [str(cell) if cell is not None else "" for cell in row1]
+        
+        # Jeśli wiersz 1 nie wygląda jak nagłówek, sprawdź wiersz 2
+        row2 = values[1] if len(values) > 1 else []
+        if row2 and is_likely_header_row(row2):
+            return [str(cell) if cell is not None else "" for cell in row2]
+        
+        # Fallback - zwróć wiersz 1 nawet jeśli nie wygląda jak nagłówek
+        return [str(cell) if cell is not None else "" for cell in row1] if row1 else []
     except Exception as e:
         logger.error(f"Błąd pobierania nagłówków z [{spreadsheet_id}] {sheet_name}: {e}")
         return []
+
+
+def detect_header_row(
+    values: List[List[Any]], 
+    search_column_name: Optional[str] = None
+) -> tuple:
+    """
+    Wykrywa wiersz nagłówków w arkuszu - sprawdza wiersz 1, a jeśli nie znajdzie 
+    oczekiwanego nagłówka, sprawdza wiersz 2.
+    
+    Args:
+        values: Lista wierszy z arkusza
+        search_column_name: Nazwa kolumny do wyszukania (opcjonalna)
+            - Jeśli podana, szuka tej konkretnej kolumny
+            - Jeśli None, szuka 'numer zlecenia'
+    
+    Returns:
+        Tuple (header_row_index, header_row, start_data_row):
+            - header_row_index: Indeks wiersza nagłówków (0 lub 1) lub None
+            - header_row: Lista wartości nagłówków lub None
+            - start_data_row: Indeks pierwszego wiersza z danymi (po nagłówku)
+    """
+    if not values:
+        return None, None, 0
+    
+    row1 = values[0] if len(values) > 0 else []
+    row2 = values[1] if len(values) > 1 else []
+    
+    # Określ nazwę kolumny do szukania
+    if search_column_name is not None and not is_search_all_columns(search_column_name):
+        # Szukamy konkretnej kolumny po nazwie
+        target_column = search_column_name
+    else:
+        # Domyślnie szukamy 'numer zlecenia'
+        target_column = None  # Użyjemy find_header_indices
+    
+    def check_row_has_target(row: List[Any]) -> bool:
+        """Sprawdza czy wiersz zawiera szukaną kolumnę."""
+        if not row:
+            return False
+        if target_column:
+            return find_column_index_by_name(row, target_column) is not None
+        else:
+            zlecenie_idx, _ = find_header_indices(row)
+            return zlecenie_idx is not None
+    
+    # Sprawdź wiersz 1 najpierw
+    if is_likely_header_row(row1):
+        if check_row_has_target(row1):
+            return 0, row1, 1  # Nagłówek w wierszu 1, dane od wiersza 2 (index 1)
+        # Wiersz 1 wygląda jak nagłówek, ale nie ma szukanej kolumny
+        # Sprawdź wiersz 2
+        if is_likely_header_row(row2) and check_row_has_target(row2):
+            return 1, row2, 2  # Nagłówek w wierszu 2, dane od wiersza 3 (index 2)
+        # Wróć do wiersza 1 (nawet bez szukanej kolumny)
+        return 0, row1, 1
+    
+    # Wiersz 1 nie wygląda jak nagłówek - sprawdź wiersz 2
+    if is_likely_header_row(row2):
+        if check_row_has_target(row2):
+            return 1, row2, 2  # Nagłówek w wierszu 2, dane od wiersza 3 (index 2)
+        return 1, row2, 2  # Wiersz 2 wygląda jak nagłówek (bez szukanej kolumny)
+    
+    # Żaden wiersz nie wygląda jak nagłówek
+    return None, None, 0
 
 
 def find_header_indices(header_row: List[Any]) -> tuple:
@@ -574,6 +655,12 @@ def search_in_sheet(
       "stawka": "..." (wartość z kolumny Stawka)
     }
 
+    Logika wykrywania nagłówków:
+    - Najpierw sprawdza wiersz 1, czy zawiera szukaną kolumnę
+    - Jeśli nie znajdzie w wierszu 1, sprawdza wiersz 2
+    - Kolumna 'Stawka' jest pobierana z tego samego wiersza nagłówków
+    - Dane są przeszukiwane od wiersza następującego po nagłówku
+
     Logika wyszukiwania:
     1. Jeśli search_column_name == 'ALL'/'Wszystkie':
        - Przeszukuj wszystkie kolumny
@@ -624,14 +711,12 @@ def search_in_sheet(
     if not values:
         return
 
-    # Sprawdź czy pierwszy wiersz to nagłówek
-    first_row = values[0] if values else []
-    has_header = is_likely_header_row(first_row)
-    start_row = 1 if has_header else 0
-    header_row = first_row if has_header else None
+    # Wykryj wiersz nagłówków (może być w wierszu 1 lub 2)
+    # Przekazujemy search_column_name do detect_header_row, aby mógł szukać odpowiedniej kolumny
+    header_row_idx, header_row, start_row = detect_header_row(values, search_column_name)
     
-    # Znajdź kolumnę stawki
-    stawka_idx = find_stawka_column_index(first_row) if has_header else None
+    # Znajdź kolumnę stawki (w tym samym wierszu nagłówków)
+    stawka_idx = find_stawka_column_index(header_row) if header_row else None
     
     # Określ tryb wyszukiwania
     search_all = is_search_all_columns(search_column_name)
@@ -639,14 +724,14 @@ def search_in_sheet(
     
     if not search_all and search_column_name is not None:
         # Szukamy konkretnej kolumny
-        target_col_idx = find_column_index_by_name(first_row, search_column_name)
+        target_col_idx = find_column_index_by_name(header_row, search_column_name) if header_row else None
         if target_col_idx is None:
             # Kolumna nie istnieje - nie zwracaj wyników dla tej zakładki
             logger.debug(f"Kolumna '{search_column_name}' nie istnieje w [{spreadsheet_name}] {sheet_name}")
             return
     elif search_column_name is None:
         # Tryb strict - szukaj tylko 'numer zlecenia'
-        zlecenie_idx, _ = find_header_indices(first_row)
+        zlecenie_idx, _ = find_header_indices(header_row) if header_row else (None, None)
         if zlecenie_idx is None:
             # Brak kolumny 'numer zlecenia' - nie zwracaj wyników
             logger.debug(f"Brak kolumny 'numer zlecenia' w [{spreadsheet_name}] {sheet_name}")
