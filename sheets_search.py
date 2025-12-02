@@ -764,3 +764,73 @@ def search_in_sheet(
                 logger.warning(
                     f"Błąd przetwarzania wiersza [{spreadsheet_name}] {sheet_name}!{r_idx+1}: {e}"
                 )
+
+
+def search_across_spreadsheets(
+    drive_service,
+    sheets_service,
+    pattern: str,
+    regex: bool = False,
+    case_sensitive: bool = False,
+    search_column_name: Optional[str] = None,
+    spreadsheet_ids: Optional[List[str]] = None,
+) -> Generator[Dict[str, Any], None, None]:
+    """
+    Przeszukuje wiele arkuszy kalkulacyjnych wg pattern.
+    
+    Gdy spreadsheet_ids jest None, pobiera wszystkie arkusze użytkownika
+    przez list_spreadsheets_owned_by_me i iteruje po nich.
+    Gdy spreadsheet_ids jest podane, iteruje tylko po podanych ID.
+    
+    Dla każdego arkusza wywołuje search_in_spreadsheet i yielduje wyniki.
+    Błąd przy jednym arkuszu nie przerywa całego procesu.
+    
+    Args:
+        drive_service: Obiekt serwisu Google Drive API
+        sheets_service: Obiekt serwisu Google Sheets API
+        pattern: Wzorzec do wyszukania
+        regex: Czy użyć wyrażenia regularnego
+        case_sensitive: Czy rozróżniać wielkość liter
+        search_column_name: Nazwa kolumny do przeszukania lub 'ALL'/'Wszystkie'
+        spreadsheet_ids: Lista ID arkuszy do przeszukania lub None (wszystkie)
+    
+    Yields:
+        Wyniki w formacie:
+        {
+          "spreadsheetId": ...,
+          "spreadsheetName": ...,
+          "sheetName": ...,
+          "cell": "A1",
+          "searchedValue": "...",
+          "stawka": "..."
+        }
+    """
+    # Pobierz listę arkuszy do przeszukania
+    if spreadsheet_ids is None:
+        try:
+            files = list_spreadsheets_owned_by_me(drive_service)
+            spreadsheet_list = [(f["id"], f.get("name", "")) for f in files]
+        except Exception as e:
+            logger.error(f"Błąd pobierania listy arkuszy: {e}")
+            return
+    else:
+        spreadsheet_list = [(sid, "") for sid in spreadsheet_ids]
+    
+    # Iteruj po wszystkich arkuszach
+    for spreadsheet_id, spreadsheet_name in spreadsheet_list:
+        try:
+            results_gen = search_in_spreadsheet(
+                drive_service,
+                sheets_service,
+                spreadsheet_id=spreadsheet_id,
+                pattern=pattern,
+                regex=regex,
+                case_sensitive=case_sensitive,
+                search_column_name=search_column_name,
+            )
+            for result in results_gen:
+                yield result
+        except Exception as e:
+            # Błąd przy jednym arkuszu nie przerywa całego procesu
+            logger.warning(f"Błąd przeszukiwania arkusza [{spreadsheet_id}]: {e}")
+            continue
