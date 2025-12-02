@@ -17,6 +17,7 @@ from sheets_search import (
     search_in_spreadsheets,
     search_in_sheet,
     search_in_spreadsheet,
+    search_across_spreadsheets,
     ALL_COLUMNS_VALUES,
 )
 
@@ -60,8 +61,9 @@ def format_result(result: dict) -> str:
 
 
 def format_ss_result_for_table(result: dict) -> list:
-    """Format a single sheet search result as table row [Arkusz, Zlecenie, Stawka]."""
+    """Format a single sheet search result as table row [Arkusz kalkulacyjny, Zakładka, Zlecenie, Stawka]."""
     return [
+        result.get('spreadsheetName', ''),
         result.get('sheetName', ''),
         result.get('searchedValue', ''),
         result.get('stawka', ''),
@@ -247,6 +249,40 @@ def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, 
         window.write_event_value(EVENT_SS_SEARCH_DONE, "error")
 
 
+def ss_search_all_spreadsheets_thread_func(window, pattern, regex, case_sensitive, search_column_name=None):
+    """Run search across all user's spreadsheets in background thread."""
+    global ss_stop_search_flag
+    try:
+        if drive_service is None or sheets_service is None:
+            window.write_event_value(EVENT_ERROR, "Najpierw zaloguj się.")
+            return
+
+        ss_stop_search_flag.clear()
+        
+        # Search across all spreadsheets using the new backend function
+        results_gen = search_across_spreadsheets(
+            drive_service,
+            sheets_service,
+            pattern=pattern,
+            regex=regex,
+            case_sensitive=case_sensitive,
+            search_column_name=search_column_name,
+            spreadsheet_ids=None,  # None means search all spreadsheets
+        )
+
+        for result in results_gen:
+            if ss_stop_search_flag.is_set():
+                window.write_event_value(EVENT_SS_SEARCH_DONE, "stopped")
+                return
+            window.write_event_value(EVENT_SS_SEARCH_RESULT, result)
+
+        window.write_event_value(EVENT_SS_SEARCH_DONE, "completed")
+
+    except Exception as e:
+        window.write_event_value(EVENT_ERROR, f"Błąd wyszukiwania: {e}")
+        window.write_event_value(EVENT_SS_SEARCH_DONE, "error")
+
+
 # -------------------- GUI Layout --------------------
 def create_auth_tab():
     """Create Authorization tab layout."""
@@ -305,13 +341,13 @@ def create_settings_tab():
 def create_single_sheet_search_tab():
     """Create Single Sheet Search tab layout."""
     # Definicja kolumn tabeli wyników
-    table_headings = ["Arkusz", "Zlecenie", "Stawka"]
+    table_headings = ["Arkusz kalkulacyjny", "Zakładka", "Zlecenie", "Stawka"]
     
     return [
         [sg.Text("Przeszukiwanie pojedynczego arkusza", font=("Helvetica", 12, "bold"))],
         [sg.HorizontalSeparator()],
         [sg.Button("Odśwież listę arkuszy", key="-SS_REFRESH_FILES-")],
-        [sg.Text("Wybierz arkusz:")],
+        [sg.Text("Wybierz arkusz:"), sg.Checkbox("Wybierz wszystkie arkusze", key="-SSPREADSHEETS_SELECT_ALL-", enable_events=True)],
         [sg.Combo(values=[], key="-SSPREADSHEETS_DROPDOWN-", enable_events=True, readonly=True, expand_x=True)],
         [sg.Text("Wybierz zakładkę:"), sg.Checkbox("Wybierz wszystkie", key="-SHEET_ALL_SHEETS-", enable_events=True)],
         [sg.Combo(values=[], key="-SSHEETS_DROPDOWN-", enable_events=True, readonly=True, expand_x=True)],
@@ -602,6 +638,16 @@ def main():
             window["-SSHEETS_DROPDOWN-"].update(values=sheets_list, value=sheets_list[0] if len(sheets_list) > 0 else "")
             window["-STATUS_BAR-"].update(f"Załadowano {len(sheets_list)} zakładek z: {data['name']}")
 
+        elif event == "-SSPREADSHEETS_SELECT_ALL-":
+            # Toggle spreadsheet dropdown based on checkbox state
+            select_all_spreadsheets = values["-SSPREADSHEETS_SELECT_ALL-"]
+            # When 'select all spreadsheets' is checked, the dropdown remains visible but search will use all spreadsheets
+            # The sheet selection controls are disabled when searching all spreadsheets
+            window["-SSHEETS_DROPDOWN-"].update(disabled=select_all_spreadsheets)
+            window["-SHEET_ALL_SHEETS-"].update(disabled=select_all_spreadsheets)
+            if select_all_spreadsheets:
+                window["-SHEET_ALL_SHEETS-"].update(value=True)  # Force all sheets mode
+
         elif event == "-SHEET_ALL_SHEETS-":
             # Toggle sheet dropdown based on checkbox state
             # Keep column input editable - user can specify a column name even when searching all sheets
@@ -618,29 +664,21 @@ def main():
                 sg.popup_error("Najpierw zaloguj się (zakładka Autoryzacja).")
                 continue
 
+            select_all_spreadsheets = values["-SSPREADSHEETS_SELECT_ALL-"]
             selected_spreadsheet = values["-SSPREADSHEETS_DROPDOWN-"]
             selected_sheet = values["-SSHEETS_DROPDOWN-"]
             all_sheets_mode = values["-SHEET_ALL_SHEETS-"]
             column_input_value = values["-SHEET_COLUMN_INPUT-"].strip()
 
-            if not selected_spreadsheet:
-                sg.popup_error("Wybierz arkusz z listy.")
-                continue
+            # When not selecting all spreadsheets, validate spreadsheet selection
+            if not select_all_spreadsheets:
+                if not selected_spreadsheet:
+                    sg.popup_error("Wybierz arkusz z listy lub zaznacz 'Wybierz wszystkie arkusze'.")
+                    continue
 
-            if not all_sheets_mode and not selected_sheet:
-                sg.popup_error("Wybierz zakładkę z listy lub zaznacz 'Wybierz wszystkie'.")
-                continue
-
-            # Get spreadsheet info
-            try:
-                combo_values = window["-SSPREADSHEETS_DROPDOWN-"].Values
-                idx = combo_values.index(selected_spreadsheet)
-                file_info = ss_current_spreadsheets[idx]
-                spreadsheet_id = file_info["id"]
-                spreadsheet_name = file_info["name"]
-            except (ValueError, IndexError):
-                sg.popup_error("Błąd: nie można znaleźć wybranego arkusza.")
-                continue
+                if not all_sheets_mode and not selected_sheet:
+                    sg.popup_error("Wybierz zakładkę z listy lub zaznacz 'Wybierz wszystkie'.")
+                    continue
 
             # Determine search_column_name based on input field
             # Empty, 'ALL' or 'Wszystkie' (case-insensitive) means search all columns
@@ -661,27 +699,55 @@ def main():
             window["-SHEET_SEARCH_BTN-"].update(disabled=True)
             window["-SHEET_SEARCH_STOP-"].update(disabled=False)
             
-            if all_sheets_mode:
-                window["-STATUS_BAR-"].update(f"Trwa wyszukiwanie we wszystkich zakładkach: {spreadsheet_name}...")
+            if select_all_spreadsheets:
+                # Search across all spreadsheets owned by user
+                window["-STATUS_BAR-"].update("Trwa wyszukiwanie we wszystkich arkuszach...")
+                ss_search_thread = threading.Thread(
+                    target=ss_search_all_spreadsheets_thread_func,
+                    args=(
+                        window,
+                        query,
+                        values["-SHEET_REGEX-"],
+                        values["-SHEET_CASE-"],
+                        search_column_name
+                    ),
+                    daemon=True
+                )
             else:
-                window["-STATUS_BAR-"].update(f"Trwa wyszukiwanie w: {spreadsheet_name} / {selected_sheet}...")
+                # Get spreadsheet info for single spreadsheet search
+                try:
+                    combo_values = window["-SSPREADSHEETS_DROPDOWN-"].Values
+                    idx = combo_values.index(selected_spreadsheet)
+                    file_info = ss_current_spreadsheets[idx]
+                    spreadsheet_id = file_info["id"]
+                    spreadsheet_name = file_info["name"]
+                except (ValueError, IndexError):
+                    sg.popup_error("Błąd: nie można znaleźć wybranego arkusza.")
+                    window["-SHEET_SEARCH_BTN-"].update(disabled=False)
+                    window["-SHEET_SEARCH_STOP-"].update(disabled=True)
+                    continue
 
-            # Start search thread
-            ss_search_thread = threading.Thread(
-                target=ss_search_thread_func,
-                args=(
-                    window,
-                    spreadsheet_id,
-                    spreadsheet_name,
-                    selected_sheet,
-                    query,
-                    values["-SHEET_REGEX-"],
-                    values["-SHEET_CASE-"],
-                    all_sheets_mode,
-                    search_column_name
-                ),
-                daemon=True
-            )
+                if all_sheets_mode:
+                    window["-STATUS_BAR-"].update(f"Trwa wyszukiwanie we wszystkich zakładkach: {spreadsheet_name}...")
+                else:
+                    window["-STATUS_BAR-"].update(f"Trwa wyszukiwanie w: {spreadsheet_name} / {selected_sheet}...")
+
+                # Start search thread for single spreadsheet
+                ss_search_thread = threading.Thread(
+                    target=ss_search_thread_func,
+                    args=(
+                        window,
+                        spreadsheet_id,
+                        spreadsheet_name,
+                        selected_sheet,
+                        query,
+                        values["-SHEET_REGEX-"],
+                        values["-SHEET_CASE-"],
+                        all_sheets_mode,
+                        search_column_name
+                    ),
+                    daemon=True
+                )
             ss_search_thread.start()
 
         elif event == "-SHEET_SEARCH_STOP-":
