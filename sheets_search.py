@@ -114,6 +114,101 @@ COLUMN_BLACKLIST = ['transport', 'uwagi', 'komentarz', 'komentarze', 'notatki', 
 ALL_COLUMNS_VALUES = ['all', 'wszystkie']
 
 
+def parse_header_rows(header_rows_input: Optional[str]) -> List[int]:
+    """
+    Parsuje konfigurację wierszy nagłówkowych z pola "Header rows".
+    
+    Obsługuje wartości oddzielone przecinkami (np. "1", "1,2", "1, 2, 3").
+    Zwraca listę indeksów wierszy 0-based.
+    
+    Args:
+        header_rows_input: String z numerami wierszy (1-based) oddzielonymi przecinkami
+                          lub None/pusty string (domyślnie wiersz 1)
+    
+    Returns:
+        Lista indeksów wierszy 0-based (np. [0] dla "1", [0, 1] dla "1,2")
+        Zwraca [0] jeśli input jest None lub nieprawidłowy
+    
+    Examples:
+        >>> parse_header_rows("1")
+        [0]
+        >>> parse_header_rows("1,2")
+        [0, 1]
+        >>> parse_header_rows("1, 2, 3")
+        [0, 1, 2]
+        >>> parse_header_rows(None)
+        [0]
+        >>> parse_header_rows("")
+        [0]
+    """
+    if not header_rows_input or not header_rows_input.strip():
+        return [0]  # Default: row 1 (0-based index)
+    
+    indices = []
+    for part in header_rows_input.split(','):
+        part = part.strip()
+        if part:
+            try:
+                row_num = int(part)
+                if row_num >= 1:  # 1-based input
+                    indices.append(row_num - 1)  # Convert to 0-based
+            except ValueError:
+                continue
+    
+    # If no valid indices found, return default
+    return indices if indices else [0]
+
+
+def combine_header_values(values: List[List[Any]], header_row_indices: List[int]) -> List[str]:
+    """
+    Łączy wartości z wielu wierszy nagłówkowych dla każdej kolumny.
+    
+    Dla każdej kolumny, bierze wartości z określonych wierszy nagłówkowych,
+    łączy je spacją i normalizuje (trim + lowercase).
+    
+    Args:
+        values: Lista wszystkich wierszy arkusza
+        header_row_indices: Lista indeksów wierszy nagłówkowych (0-based)
+    
+    Returns:
+        Lista połączonych nagłówków dla każdej kolumny (znormalizowane)
+    
+    Examples:
+        >>> values = [["Name", "Age"], ["First Last", "Years"]]
+        >>> combine_header_values(values, [0, 1])
+        ['name first last', 'age years']
+    """
+    if not values or not header_row_indices:
+        return []
+    
+    # Find maximum number of columns across all header rows
+    max_cols = 0
+    for row_idx in header_row_indices:
+        if row_idx < len(values):
+            max_cols = max(max_cols, len(values[row_idx]))
+    
+    if max_cols == 0:
+        return []
+    
+    # Combine header values for each column
+    combined_headers = []
+    for col_idx in range(max_cols):
+        col_parts = []
+        for row_idx in header_row_indices:
+            if row_idx < len(values):
+                row = values[row_idx]
+                if col_idx < len(row) and row[col_idx] is not None:
+                    cell_value = str(row[col_idx]).strip()
+                    if cell_value:
+                        col_parts.append(cell_value)
+        
+        # Join with space and normalize
+        combined = ' '.join(col_parts)
+        combined_headers.append(normalize_header_name(combined))
+    
+    return combined_headers
+
+
 def normalize_header_name(name: Any) -> str:
     """
     Normalizuje nazwę nagłówka kolumny:
@@ -321,27 +416,45 @@ def get_sheet_headers(sheets_service, spreadsheet_id: str, sheet_name: str) -> L
 
 def detect_header_row(
     values: List[List[Any]], 
-    search_column_name: Optional[str] = None
+    search_column_name: Optional[str] = None,
+    header_row_indices: Optional[List[int]] = None
 ) -> tuple:
     """
     Wykrywa wiersz nagłówków w arkuszu - sprawdza wiersz 1, a jeśli nie znajdzie 
     oczekiwanego nagłówka, sprawdza wiersz 2.
+    
+    Gdy header_row_indices jest podane, używa tych wierszy do budowy połączonych
+    nagłówków (łącząc wartości z wielu wierszy spacją).
     
     Args:
         values: Lista wierszy z arkusza
         search_column_name: Nazwa kolumny do wyszukania (opcjonalna)
             - Jeśli podana, szuka tej konkretnej kolumny
             - Jeśli None, szuka 'numer zlecenia'
+        header_row_indices: Lista indeksów wierszy nagłówkowych (0-based)
+            - Jeśli podana, używa tych wierszy do budowy połączonych nagłówków
+            - Jeśli None, wykrywa automatycznie (wiersz 1 lub 2)
     
     Returns:
         Tuple (header_row_index, header_row, start_data_row):
-            - header_row_index: Indeks wiersza nagłówków (0 lub 1) lub None
-            - header_row: Lista wartości nagłówków lub None
+            - header_row_index: Indeks wiersza nagłówków (0 lub 1) lub lista indeksów
+            - header_row: Lista wartości nagłówków (połączone jeśli wiele wierszy) lub None
             - start_data_row: Indeks pierwszego wiersza z danymi (po nagłówku)
     """
     if not values:
         return None, None, 0
     
+    # Jeśli podano konkretne wiersze nagłówkowe, użyj ich
+    if header_row_indices is not None and len(header_row_indices) > 0:
+        # Combine headers from specified rows
+        combined_headers = combine_header_values(values, header_row_indices)
+        if combined_headers:
+            # Start data row is after the last header row
+            start_data_row = max(header_row_indices) + 1
+            return header_row_indices, combined_headers, start_data_row
+        # If combining failed, fall through to auto-detection
+    
+    # Auto-detection logic (original behavior)
     row1 = values[0] if len(values) > 0 else []
     row2 = values[1] if len(values) > 1 else []
     
@@ -728,6 +841,7 @@ def search_in_spreadsheet(
     search_column_name: Optional[str] = None,
     stop_event: Optional[threading.Event] = None,
     ignore_patterns: Optional[List[str]] = None,
+    header_row_indices: Optional[List[int]] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Przeszukuje wszystkie zakładki w konkretnym arkuszu wg pattern.
@@ -742,6 +856,7 @@ def search_in_spreadsheet(
         search_column_name: Nazwa kolumny do przeszukania lub 'ALL'/'Wszystkie'
         stop_event: Opcjonalny obiekt threading.Event do sygnalizowania zatrzymania
         ignore_patterns: Opcjonalna lista wzorców ignorowania (z parse_ignore_patterns)
+        header_row_indices: Opcjonalna lista indeksów wierszy nagłówkowych (0-based)
     
     Zwraca generator wyników w formacie:
     {
@@ -790,6 +905,7 @@ def search_in_spreadsheet(
             spreadsheet_name=spreadsheet_name,
             stop_event=stop_event,
             ignore_patterns=ignore_patterns,
+            header_row_indices=header_row_indices,
         )
 
 
@@ -805,6 +921,7 @@ def search_in_sheet(
     spreadsheet_name: Optional[str] = None,
     stop_event: Optional[threading.Event] = None,
     ignore_patterns: Optional[List[str]] = None,
+    header_row_indices: Optional[List[int]] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Przeszukuje tylko wybraną zakładkę w konkretnym arkuszu wg pattern.
@@ -825,6 +942,9 @@ def search_in_sheet(
         stop_event: Opcjonalny obiekt threading.Event do sygnalizowania zatrzymania
         ignore_patterns: Opcjonalna lista wzorców ignorowania (z parse_ignore_patterns)
             - Kolumny pasujące do wzorców są pomijane nawet jeśli pasują do search_column_name
+        header_row_indices: Opcjonalna lista indeksów wierszy nagłówkowych (0-based)
+            - Jeśli podana, używa tych wierszy do budowy połączonych nagłówków
+            - Jeśli None, wykrywa automatycznie (wiersz 1 lub 2)
     
     Zwraca generator wyników w formacie:
     {
@@ -837,7 +957,8 @@ def search_in_sheet(
     }
 
     Logika wykrywania nagłówków:
-    - Najpierw sprawdza wiersz 1, czy zawiera szukaną kolumnę
+    - Jeśli header_row_indices podane, używa tych wierszy i łączy wartości spacją
+    - W przeciwnym razie sprawdza wiersz 1, czy zawiera szukaną kolumnę
     - Jeśli nie znajdzie w wierszu 1, sprawdza wiersz 2
     - Kolumna 'Stawka' jest pobierana z tego samego wiersza nagłówków
     - Dane są przeszukiwane od wiersza następującego po nagłówku
@@ -896,9 +1017,9 @@ def search_in_sheet(
     if not values:
         return
 
-    # Wykryj wiersz nagłówków (może być w wierszu 1 lub 2)
-    # Przekazujemy search_column_name do detect_header_row, aby mógł szukać odpowiedniej kolumny
-    header_row_idx, header_row, start_row = detect_header_row(values, search_column_name)
+    # Wykryj wiersz nagłówków (może być w wierszu 1 lub 2, lub wiele wierszy jeśli header_row_indices podane)
+    # Przekazujemy search_column_name i header_row_indices do detect_header_row
+    header_row_idx, header_row, start_row = detect_header_row(values, search_column_name, header_row_indices)
     
     # Znajdź kolumnę stawki (w tym samym wierszu nagłówków)
     stawka_idx = find_stawka_column_index(header_row) if header_row else None
@@ -1066,6 +1187,7 @@ def search_across_spreadsheets(
     spreadsheet_ids: Optional[List[str]] = None,
     stop_event: Optional[threading.Event] = None,
     ignore_patterns: Optional[List[str]] = None,
+    header_row_indices: Optional[List[int]] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Przeszukuje wiele arkuszy kalkulacyjnych wg pattern.
@@ -1087,6 +1209,7 @@ def search_across_spreadsheets(
         spreadsheet_ids: Lista ID arkuszy do przeszukania lub None (wszystkie)
         stop_event: Opcjonalny obiekt threading.Event do sygnalizowania zatrzymania
         ignore_patterns: Opcjonalna lista wzorców ignorowania (z parse_ignore_patterns)
+        header_row_indices: Opcjonalna lista indeksów wierszy nagłówkowych (0-based)
     
     Yields:
         Wyniki w formacie:
@@ -1130,6 +1253,7 @@ def search_across_spreadsheets(
                 search_column_name=search_column_name,
                 stop_event=stop_event,
                 ignore_patterns=ignore_patterns,
+                header_row_indices=header_row_indices,
             )
             for result in results_gen:
                 # Check stop_event after each result

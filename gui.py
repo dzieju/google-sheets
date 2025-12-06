@@ -22,6 +22,7 @@ from sheets_search import (
     find_duplicates_across_spreadsheets,
     ALL_COLUMNS_VALUES,
     parse_ignore_patterns,
+    parse_header_rows,
 )
 
 
@@ -70,8 +71,9 @@ def format_result(result: dict) -> str:
 
 
 def format_ss_result_for_table(result: dict) -> list:
-    """Format a single sheet search result as table row [Arkusz kalkulacyjny, Zakładka, Zlecenie, Stawka]."""
+    """Format a single sheet search result as table row [Arkusz, Arkusz kalkulacyjny, Zakładka, Zlecenie, Stawka]."""
     return [
+        result.get('sheetName', ''),  # Arkusz (tab/sheet name)
         result.get('spreadsheetName', ''),
         result.get('sheetName', ''),
         result.get('searchedValue', ''),
@@ -88,7 +90,7 @@ def format_dup_result_for_table(result: dict) -> list:
         example_rows += f'... (+{len(rows) - 5})'
     
     return [
-        f"{result.get('spreadsheetName', '')} / {result.get('sheetName', '')}",
+        result.get('sheetName', ''),  # Arkusz (tab/sheet name)
         result.get('columnName', ''),
         result.get('value', ''),
         str(result.get('count', 0)),
@@ -229,7 +231,7 @@ def ss_load_sheets_thread(window, spreadsheet_id, spreadsheet_name):
         window.write_event_value(EVENT_ERROR, f"Błąd ładowania arkuszy: {e}")
 
 
-def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, pattern, regex, case_sensitive, all_sheets=False, search_column_name=None, ignore_patterns=None):
+def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, pattern, regex, case_sensitive, all_sheets=False, search_column_name=None, ignore_patterns=None, header_row_indices=None):
     """Run search in a single sheet or all sheets in background thread."""
     global ss_stop_search_flag
     try:
@@ -251,6 +253,7 @@ def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, 
                 search_column_name=search_column_name,
                 stop_event=ss_stop_search_flag,
                 ignore_patterns=ignore_patterns,
+                header_row_indices=header_row_indices,
             )
         else:
             # Search in a single sheet
@@ -265,6 +268,7 @@ def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, 
                 search_column_name=search_column_name,
                 stop_event=ss_stop_search_flag,
                 ignore_patterns=ignore_patterns,
+                header_row_indices=header_row_indices,
             )
 
         for result in results_gen:
@@ -280,7 +284,7 @@ def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, 
         window.write_event_value(EVENT_SS_SEARCH_DONE, "error")
 
 
-def ss_search_all_spreadsheets_thread_func(window, pattern, regex, case_sensitive, search_column_name=None, ignore_patterns=None):
+def ss_search_all_spreadsheets_thread_func(window, pattern, regex, case_sensitive, search_column_name=None, ignore_patterns=None, header_row_indices=None):
     """Run search across all user's spreadsheets in background thread."""
     global ss_stop_search_flag
     try:
@@ -301,6 +305,7 @@ def ss_search_all_spreadsheets_thread_func(window, pattern, regex, case_sensitiv
             spreadsheet_ids=None,  # None means search all spreadsheets
             stop_event=ss_stop_search_flag,
             ignore_patterns=ignore_patterns,
+            header_row_indices=header_row_indices,
         )
 
         for result in results_gen:
@@ -477,9 +482,9 @@ def create_settings_tab():
 
 def create_single_sheet_search_tab():
     """Create Single Sheet Search tab layout."""
-    # Definicja kolumn tabeli wyników
-    table_headings = ["Arkusz kalkulacyjny", "Zakładka", "Zlecenie", "Stawka"]
-    # Definicja kolumn tabeli duplikatów
+    # Definicja kolumn tabeli wyników (dodano "Arkusz" jako pierwszą kolumnę)
+    table_headings = ["Arkusz", "Arkusz kalkulacyjny", "Zakładka", "Zlecenie", "Stawka"]
+    # Definicja kolumn tabeli duplikatów (dodano "Arkusz" jako pierwszą kolumnę)
     dup_table_headings = ["Arkusz", "Kolumna", "Wartość", "Ile razy", "Przykładowe wiersze"]
     
     return [
@@ -496,6 +501,7 @@ def create_single_sheet_search_tab():
         [sg.Text("Zapytanie:"), sg.Input(key="-SHEET_QUERY-", expand_x=True)],
         [sg.Text("Ignoruj (puste = brak, oddziel przecinkiem/średnikiem/nową linią, obsługuje wildcards *):")],
         [sg.Multiline(key="-SHEET_IGNORE-", size=(None, 3), default_text="", expand_x=True)],
+        [sg.Text("Header rows (domyślnie '1', można podać wiele oddzielone przecinkami np. '1,2'):"), sg.Input(key="-HEADER_ROWS-", default_text="1", size=(10, 1))],
         [sg.Checkbox("Regex", key="-SHEET_REGEX-"), sg.Checkbox("Rozróżniaj wielkość liter", key="-SHEET_CASE-")],
         [
             sg.Button("Szukaj", key="-SHEET_SEARCH_BTN-"),
@@ -838,6 +844,10 @@ def main():
             # Parse ignore patterns from the Ignoruj field
             ignore_input = values["-SHEET_IGNORE-"].strip()
             ignore_patterns = parse_ignore_patterns(ignore_input) if ignore_input else None
+            
+            # Parse header rows from the Header rows field
+            header_rows_input = values["-HEADER_ROWS-"].strip()
+            header_row_indices = parse_header_rows(header_rows_input)
 
             # When not selecting all spreadsheets, validate spreadsheet selection
             if not select_all_spreadsheets:
@@ -879,7 +889,8 @@ def main():
                         values["-SHEET_REGEX-"],
                         values["-SHEET_CASE-"],
                         search_column_name,
-                        ignore_patterns
+                        ignore_patterns,
+                        header_row_indices
                     ),
                     daemon=True
                 )
@@ -915,7 +926,8 @@ def main():
                         values["-SHEET_CASE-"],
                         all_sheets_mode,
                         search_column_name,
-                        ignore_patterns
+                        ignore_patterns,
+                        header_row_indices
                     ),
                     daemon=True
                 )
