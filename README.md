@@ -57,6 +57,23 @@ Aplikacja pozwala na wykluczenie określonych kolumn z wyszukiwania za pomocą p
 - **Priorytet**: Kolumny pasujące do wzorców ignorowania nie będą zwracane nawet jeśli pasują do zapytania
 - **Normalizacja**: Porównanie jest niewrażliwe na wielkość liter i białe znaki, tak jak w przypadku nazw kolumn
 
+### Konfiguracja wierszy nagłówkowych (pole "Header rows")
+Aplikacja pozwala na określenie, które wiersze arkusza zawierają nagłówki kolumn:
+- **Jak używać**: W interfejsie graficznym (GUI), w zakładce "Przeszukiwanie arkusza", znajduje się pole "Header rows" (domyślnie "1")
+- **Format**: Wprowadź numery wierszy oddzielone przecinkami (np. "1" dla pojedynczego wiersza, "1,2" dla dwóch wierszy)
+- **Przykłady**:
+  - `1` - tylko pierwszy wiersz zawiera nagłówki (domyślne)
+  - `1,2` - nagłówki są w wierszach 1 i 2, wartości są łączone spacją dla każdej kolumny
+  - `2` - tylko drugi wiersz zawiera nagłówki (dane zaczynają się od wiersza 3)
+- **Łączenie nagłówków**: Gdy podano wiele wierszy (np. "1,2"), wartości z tych wierszy dla każdej kolumny są łączone spacją i normalizowane (trim + lowercase)
+- **Przykład łączenia**: Jeśli wiersz 1 zawiera "First" a wiersz 2 zawiera "Last" w tej samej kolumnie, wynikowy nagłówek to "first last"
+
+### Nazwa arkusza w wynikach
+Wszystkie wyniki wyszukiwania i duplikatów zawierają teraz nazwę arkusza (zakładki):
+- **W tabeli wyników**: Pierwsza kolumna "Arkusz" pokazuje nazwę zakładki (np. "2025")
+- **W eksporcie JSON**: Pole "sheetName" zawiera nazwę zakładki dla każdego wyniku
+- **Kompatybilność**: Zachowana pełna kompatybilność wsteczna - wszystkie wyniki zawierają nazwę arkusza
+
 ### Wykrywanie duplikatów
 Funkcja wykrywania duplikatów również obsługuje wiele kolumn:
 - Wykrywa duplikaty osobno w każdej kolumnie o podanej nazwie
@@ -73,6 +90,13 @@ Funkcja wykrywania duplikatów również obsługuje wiele kolumn:
 - Nie commituj `credentials.json` ani `token.json` do repo (dodane do .gitignore).
 
 ## Changelog
+
+### v2.2 - Wiele wierszy nagłówkowych i nazwa arkusza w wynikach
+- **NOWOŚĆ**: Dodano pole "Header rows" do konfiguracji wierszy nagłówkowych (domyślnie "1")
+- **NOWOŚĆ**: Obsługa wielu wierszy nagłówkowych (np. "1,2") - wartości są łączone spacją dla każdej kolumny
+- **NOWOŚĆ**: Kolumna "Arkusz" w tabelach wyników i duplikatów pokazuje nazwę zakładki
+- **NOWOŚĆ**: Pole "sheetName" w eksporcie JSON zawiera nazwę zakładki dla każdego wyniku
+- Zachowana pełna kompatybilność wsteczna - domyślne zachowanie (wiersz 1) pozostaje bez zmian
 
 ### v2.1 - Pole "Ignoruj" do wykluczania kolumn
 - **NOWOŚĆ**: Dodano pole "Ignoruj:" w interfejsie GUI do wykluczania określonych kolumn z wyszukiwania
