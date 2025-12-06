@@ -184,7 +184,8 @@ def combine_header_values(values: List[List[Any]], header_row_indices: List[int]
     # Find maximum number of columns across all header rows
     max_cols = 0
     for row_idx in header_row_indices:
-        if row_idx < len(values):
+        # Check bounds: row_idx must be non-negative and within values range
+        if row_idx >= 0 and row_idx < len(values):
             max_cols = max(max_cols, len(values[row_idx]))
     
     if max_cols == 0:
@@ -195,7 +196,8 @@ def combine_header_values(values: List[List[Any]], header_row_indices: List[int]
     for col_idx in range(max_cols):
         col_parts = []
         for row_idx in header_row_indices:
-            if row_idx < len(values):
+            # Check bounds: row_idx must be non-negative and within values range
+            if row_idx >= 0 and row_idx < len(values):
                 row = values[row_idx]
                 if col_idx < len(row) and row[col_idx] is not None:
                     cell_value = str(row[col_idx]).strip()

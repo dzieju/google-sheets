@@ -71,13 +71,12 @@ def format_result(result: dict) -> str:
 
 
 def format_ss_result_for_table(result: dict) -> list:
-    """Format a single sheet search result as table row [Arkusz, Arkusz kalkulacyjny, Zakładka, Zlecenie, Stawka]."""
+    """Format a single sheet search result as table row [Arkusz, Arkusz kalkulacyjny, Zlecenie, Stawka]."""
     return [
         result.get('sheetName', ''),  # Arkusz (tab/sheet name)
-        result.get('spreadsheetName', ''),
-        result.get('sheetName', ''),
-        result.get('searchedValue', ''),
-        result.get('stawka', ''),
+        result.get('spreadsheetName', ''),  # Arkusz kalkulacyjny
+        result.get('searchedValue', ''),  # Zlecenie
+        result.get('stawka', ''),  # Stawka
     ]
 
 
@@ -483,7 +482,7 @@ def create_settings_tab():
 def create_single_sheet_search_tab():
     """Create Single Sheet Search tab layout."""
     # Definicja kolumn tabeli wyników (dodano "Arkusz" jako pierwszą kolumnę)
-    table_headings = ["Arkusz", "Arkusz kalkulacyjny", "Zakładka", "Zlecenie", "Stawka"]
+    table_headings = ["Arkusz", "Arkusz kalkulacyjny", "Zlecenie", "Stawka"]
     # Definicja kolumn tabeli duplikatów (dodano "Arkusz" jako pierwszą kolumnę)
     dup_table_headings = ["Arkusz", "Kolumna", "Wartość", "Ile razy", "Przykładowe wiersze"]
     
