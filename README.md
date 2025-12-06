@@ -45,17 +45,25 @@ Aplikacja automatycznie wyszukuje **wszystkie kolumny** o podanej nazwie nagłó
 - **Ignorowanie białych znaków**: "Numer zlecenia" = "Numer  zlecenia" = " Numer zlecenia "
 - **Normalizacja podkreślników**: "numer_zlecenia" = "numer zlecenia"
 
-### Ignorowanie kolumn (pole "Ignoruj")
-Aplikacja pozwala na wykluczenie określonych kolumn z wyszukiwania za pomocą pola "Ignoruj:":
+### Ignorowanie kolumn i wartości (pole "Ignoruj")
+Aplikacja pozwala na wykluczenie określonych kolumn oraz wartości komórek z wyników wyszukiwania za pomocą pola "Ignoruj:":
 - **Jak używać**: W interfejsie graficznym (GUI), w zakładce "Przeszukiwanie arkusza", znajduje się pole "Ignoruj" pod polem "Zapytanie"
-- **Format**: Wprowadź nazwy kolumn do ignorowania, oddzielone przecinkami, średnikami lub nowymi liniami
-- **Przykład**: `temp, debug, old` - ignoruje kolumny o nazwach "temp", "debug" i "old"
-- **Wildcards**: Obsługuje proste wzorce z gwiazdką (*):
-  - `temp*` - ignoruje kolumny zaczynające się na "temp" (np. "temporary", "temp_col")
-  - `*old` - ignoruje kolumny kończące się na "old" (np. "test_old", "old")
-  - `*debug*` - ignoruje kolumny zawierające "debug" (np. "debug_mode", "old_debug_temp")
-- **Priorytet**: Kolumny pasujące do wzorców ignorowania nie będą zwracane nawet jeśli pasują do zapytania
-- **Normalizacja**: Porównanie jest niewrażliwe na wielkość liter i białe znaki, tak jak w przypadku nazw kolumn
+- **Format**: Wprowadź wzorce do ignorowania, oddzielone przecinkami, średnikami lub nowymi liniami
+- **Przykład**: `temp, debug, old` - ignoruje kolumny o nazwach zawierających "temp", "debug" lub "old", oraz wartości komórek zawierające te słowa
+- **Zastosowanie**:
+  - **Ignorowanie nagłówków kolumn**: Kolumny których nazwy pasują do wzorców nie będą przeszukiwane
+  - **Ignorowanie wartości komórek**: Dopasowane wartości komórek zawierające wzorce ignorowania będą pomijane w wynikach
+- **Wzorce dopasowania**:
+  - Wzorce **bez gwiazdki** (`*`) są dopasowywane jako **podciąg** (substring, case-insensitive):
+    - `https` - ignoruje wszystkie wartości zawierające "https" (np. URL-e "https://...")
+    - `temp` - ignoruje kolumny i wartości zawierające "temp" (np. "temporary", "temp_data", "123temp")
+  - Wzorce **z gwiazdką** (`*`) działają jako **wildcard**:
+    - `temp*` - ignoruje kolumny/wartości zaczynające się na "temp" (np. "temporary", "temp_col")
+    - `*old` - ignoruje kolumny/wartości kończące się na "old" (np. "test_old", "old")
+    - `*debug*` - ignoruje kolumny/wartości zawierające "debug" (np. "debug_mode", "old_debug_temp")
+- **Priorytet**: Kolumny i wartości pasujące do wzorców ignorowania nie będą zwracane nawet jeśli pasują do zapytania
+- **Normalizacja**: Porównanie jest niewrażliwe na wielkość liter i białe znaki
+- **Przykład użycia**: Wpisanie "https" w polu Ignoruj spowoduje pominięcie wszystkich wyników zawierających URL-e z "https://"
 
 ### Konfiguracja wierszy nagłówkowych (pole "Header rows")
 Aplikacja pozwala na określenie, które wiersze arkusza zawierają nagłówki kolumn:
@@ -90,6 +98,16 @@ Funkcja wykrywania duplikatów również obsługuje wiele kolumn:
 - Nie commituj `credentials.json` ani `token.json` do repo (dodane do .gitignore).
 
 ## Changelog
+
+### v2.3 - Ignorowanie wartości komórek oraz nowa semantyka wzorców
+- **NOWOŚĆ**: Pole "Ignoruj" filtruje teraz również **wartości dopasowanych komórek**, nie tylko nagłówki kolumn
+- **ZMIANA**: Wzorce bez gwiazdki (`*`) są teraz dopasowywane jako **podciąg** (substring match), nie jako exact match
+  - Przykład: `https` w polu Ignoruj pominie wszystkie wyniki zawierające "https" w wartości (np. URL-e)
+  - Przykład: `temp` pominie zarówno kolumny jak i wartości zawierające "temp"
+- **ZACHOWANE**: Wzorce z gwiazdką (`*`) działają jak wcześniej (prefix/suffix/contains wildcard)
+- **NOWOŚĆ**: Nowa funkcja `matches_ignore_value()` do sprawdzania wartości komórek
+- Dodano kompleksowe testy jednostkowe dla nowej funkcjonalności
+- Zachowana pełna kompatybilność wsteczna dla wildcard patterns
 
 ### v2.2 - Wiele wierszy nagłówkowych i nazwa arkusza w wynikach
 - **NOWOŚĆ**: Dodano pole "Header rows" do konfiguracji wierszy nagłówkowych (domyślnie "1")

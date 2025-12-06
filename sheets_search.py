@@ -315,7 +315,7 @@ def matches_ignore_pattern(header_name: str, ignore_patterns: List[str]) -> bool
     - "pattern*" - dopasowanie prefiksu (startsWith)
     - "*pattern" - dopasowanie sufiksu (endsWith)
     - "*pattern*" - dopasowanie podciągu (contains)
-    - "pattern" - dokładne dopasowanie
+    - "pattern" - dopasowanie podciągu (substring match, case-insensitive)
     
     Porównanie jest case-insensitive i po trim.
     
@@ -332,6 +332,8 @@ def matches_ignore_pattern(header_name: str, ignore_patterns: List[str]) -> bool
         >>> matches_ignore_pattern("debug_mode", ["*debug*"])
         True
         >>> matches_ignore_pattern("test", ["test"])
+        True
+        >>> matches_ignore_pattern("test_column", ["test"])  # substring match
         True
         >>> matches_ignore_pattern("production", ["temp*", "test*"])
         False
@@ -367,8 +369,78 @@ def matches_ignore_pattern(header_name: str, ignore_patterns: List[str]) -> bool
             if search_term and normalized_header.startswith(search_term):
                 return True
         else:
-            # Dokładne dopasowanie (po normalizacji)
-            if pattern == normalized_header:
+            # Dopasowanie podciągu (substring match, case-insensitive)
+            if pattern in normalized_header:
+                return True
+    
+    return False
+
+
+def matches_ignore_value(cell_value: str, ignore_patterns: List[str]) -> bool:
+    """
+    Sprawdza czy wartość komórki pasuje do któregokolwiek wzorca ignorowania.
+    
+    Obsługuje proste wildcardy:
+    - "pattern*" - dopasowanie prefiksu (startsWith)
+    - "*pattern" - dopasowanie sufiksu (endsWith)
+    - "*pattern*" - dopasowanie podciągu (contains)
+    - "pattern" - dopasowanie podciągu (substring match, case-insensitive)
+    
+    Porównanie jest case-insensitive i po trim.
+    
+    Args:
+        cell_value: Wartość komórki do sprawdzenia
+        ignore_patterns: Lista wzorców ignorowania
+    
+    Returns:
+        True jeśli wartość pasuje do któregokolwiek wzorca
+    
+    Examples:
+        >>> matches_ignore_value("https://example.com", ["https"])
+        True
+        >>> matches_ignore_value("HTTP://EXAMPLE.COM", ["https"])
+        True
+        >>> matches_ignore_value("some text", ["https"])
+        False
+        >>> matches_ignore_value("test_value", ["test*"])
+        True
+    """
+    if not ignore_patterns:
+        return False
+    
+    if not cell_value:
+        return False
+    
+    # Normalizuj wartość komórki (trim + lowercase)
+    normalized_value = str(cell_value).strip().lower()
+    
+    if not normalized_value:
+        return False
+    
+    for pattern in ignore_patterns:
+        pattern = pattern.strip().lower()
+        if not pattern:
+            continue
+        
+        # Obsługa wildcardów
+        if pattern.startswith('*') and pattern.endswith('*'):
+            # *pattern* - contains
+            search_term = pattern[1:-1]
+            if search_term and search_term in normalized_value:
+                return True
+        elif pattern.startswith('*'):
+            # *pattern - endsWith
+            search_term = pattern[1:]
+            if search_term and normalized_value.endswith(search_term):
+                return True
+        elif pattern.endswith('*'):
+            # pattern* - startsWith
+            search_term = pattern[:-1]
+            if search_term and normalized_value.startswith(search_term):
+                return True
+        else:
+            # Dopasowanie podciągu (substring match, case-insensitive)
+            if pattern in normalized_value:
                 return True
     
     return False
@@ -1130,6 +1202,10 @@ def search_in_sheet(
                         cell_text = str(cell)
 
                     if check_match(cell_text):
+                        # Sprawdź czy wartość komórki nie jest ignorowana
+                        if ignore_patterns and matches_ignore_value(cell_text, ignore_patterns):
+                            continue  # Pomiń ignorowane wartości
+                        
                         stawka_value = get_stawka_for_row(row, c_idx)
                         
                         yield {
@@ -1163,6 +1239,10 @@ def search_in_sheet(
                         continue
                     
                     if check_match(cell_value):
+                        # Sprawdź czy wartość komórki nie jest ignorowana
+                        if ignore_patterns and matches_ignore_value(cell_value, ignore_patterns):
+                            continue  # Pomiń ignorowane wartości
+                        
                         stawka_value = get_stawka_for_row(row, target_col_idx)
                         
                         yield {
