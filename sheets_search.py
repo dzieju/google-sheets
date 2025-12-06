@@ -21,6 +21,14 @@ Nowa funkcjonalność:
   konkretna nazwa kolumny przeszukuje tylko tę kolumnę, brak wartości przeszukuje 'numer zlecenia'
 - Wykrywanie nagłówków w wierszu 1 lub 2: jeśli szukana kolumna nie znajduje się w wierszu 1,
   algorytm sprawdza również wiersz 2 i odpowiednio dostosowuje indeks początkowy danych
+
+Obsługa wielu kolumn o tej samej nazwie (v2):
+- find_all_column_indices_by_name() - znajduje wszystkie kolumny o danej nazwie (case-insensitive, trimmed)
+- search_in_sheet() i search_in_spreadsheet() przeszukują WSZYSTKIE kolumny o podanej nazwie
+  w każdym arkuszu/zakładce, zachowując kolejność (najpierw kolejność arkuszy, potem indeks kolumny)
+- find_duplicates_in_sheet() wykrywa duplikaty w każdej kolumnie osobno i rozróżnia kolumny
+  w wynikach (dodaje informację o literze kolumny gdy jest wiele kolumn o tej samej nazwie)
+- Zachowana kompatybilność wsteczna: funkcje zwracają wszystkie dopasowania zamiast tylko pierwszego
 """
 
 import logging
@@ -333,6 +341,33 @@ def find_column_index_by_name(header_row: List[Any], column_name: str) -> Option
             return idx
     
     return None
+
+
+def find_all_column_indices_by_name(header_row: List[Any], column_name: str) -> List[int]:
+    """
+    Znajduje wszystkie indeksy kolumn pasujących do podanej nazwy (znormalizowanej, case-insensitive).
+    
+    Args:
+        header_row: Lista wartości pierwszego wiersza (nagłówka)
+        column_name: Nazwa kolumny do znalezienia
+    
+    Returns:
+        Lista indeksów wszystkich kolumn pasujących do nazwy (może być pusta)
+    """
+    if not header_row or not column_name:
+        return []
+    
+    norm_target = normalize_header_name(column_name)
+    matching_indices = []
+    
+    for idx, cell in enumerate(header_row):
+        if cell is None:
+            continue
+        norm_cell = normalize_header_name(cell)
+        if norm_cell == norm_target:
+            matching_indices.append(idx)
+    
+    return matching_indices
 
 
 def find_stawka_column_index(header_row: List[Any]) -> Optional[int]:
@@ -750,12 +785,12 @@ def search_in_sheet(
     
     # Określ tryb wyszukiwania
     search_all = is_search_all_columns(search_column_name)
-    target_col_idx = None
+    target_col_indices = []  # Changed from single index to list of indices
     
     if not search_all and search_column_name is not None:
-        # Szukamy konkretnej kolumny
-        target_col_idx = find_column_index_by_name(header_row, search_column_name) if header_row else None
-        if target_col_idx is None:
+        # Szukamy konkretnej kolumny - znajdź WSZYSTKIE kolumny o tej nazwie
+        target_col_indices = find_all_column_indices_by_name(header_row, search_column_name) if header_row else []
+        if not target_col_indices:
             # Kolumna nie istnieje - nie zwracaj wyników dla tej zakładki
             logger.debug(f"Kolumna '{search_column_name}' nie istnieje w [{spreadsheet_name}] {sheet_name}")
             return
@@ -766,7 +801,7 @@ def search_in_sheet(
             # Brak kolumny 'numer zlecenia' - nie zwracaj wyników
             logger.debug(f"Brak kolumny 'numer zlecenia' w [{spreadsheet_name}] {sheet_name}")
             return
-        target_col_idx = zlecenie_idx
+        target_col_indices = [zlecenie_idx]
 
     def check_match(cell_text: str) -> bool:
         """Sprawdza czy komórka pasuje do wzorca."""
@@ -856,7 +891,7 @@ def search_in_sheet(
                     )
                     continue
     else:
-        # Tryb konkretnej kolumny (target_col_idx jest ustawiony)
+        # Tryb konkretnej kolumny (target_col_indices zawiera listę wszystkich kolumn do przeszukania)
         for r_idx in range(start_row, len(values)):
             # Check stop_event periodically during row iteration
             if stop_event is not None and stop_event.is_set():
@@ -865,22 +900,24 @@ def search_in_sheet(
             if row is None:
                 continue
             try:
-                # Pobierz wartość z docelowej kolumny
-                cell_value = get_cell_value_safe(row, target_col_idx)
-                if cell_value is None:
-                    continue
-                
-                if check_match(cell_value):
-                    stawka_value = get_stawka_for_row(row, target_col_idx)
+                # Iteruj przez wszystkie kolumny pasujące do nazwy
+                for target_col_idx in target_col_indices:
+                    # Pobierz wartość z docelowej kolumny
+                    cell_value = get_cell_value_safe(row, target_col_idx)
+                    if cell_value is None:
+                        continue
                     
-                    yield {
-                        "spreadsheetId": spreadsheet_id,
-                        "spreadsheetName": spreadsheet_name,
-                        "sheetName": sheet_name,
-                        "cell": cell_address(r_idx, target_col_idx),
-                        "searchedValue": cell_value,
-                        "stawka": stawka_value,
-                    }
+                    if check_match(cell_value):
+                        stawka_value = get_stawka_for_row(row, target_col_idx)
+                        
+                        yield {
+                            "spreadsheetId": spreadsheet_id,
+                            "spreadsheetName": spreadsheet_name,
+                            "sheetName": sheet_name,
+                            "cell": cell_address(r_idx, target_col_idx),
+                            "searchedValue": cell_value,
+                            "stawka": stawka_value,
+                        }
             except Exception as e:
                 logger.warning(
                     f"Błąd przetwarzania wiersza [{spreadsheet_name}] {sheet_name}!{r_idx+1}: {e}"
@@ -1044,78 +1081,86 @@ def find_duplicates_in_sheet(
         logger.debug(f"Brak wiersza nagłówków w [{spreadsheet_name}] {sheet_name}")
         return []
     
-    # Znajdź indeks kolumny
-    target_col_idx = find_column_index_by_name(header_row, search_column_name)
+    # Znajdź wszystkie indeksy kolumn pasujących do nazwy
+    target_col_indices = find_all_column_indices_by_name(header_row, search_column_name)
     
-    if target_col_idx is None:
+    if not target_col_indices:
         logger.debug(f"Kolumna '{search_column_name}' nie istnieje w [{spreadsheet_name}] {sheet_name}")
         return []
     
-    # Słownik do zbierania wartości: normalized_value -> [(row_index_1based, raw_value), ...]
-    value_occurrences: Dict[str, List[Tuple[int, str]]] = {}
+    # Słownik do zbierania wartości: (col_idx, normalized_value) -> [(row_index_1based, raw_value), ...]
+    # Grupujemy per kolumna, aby wykrywać duplikaty w ramach każdej kolumny osobno
+    all_duplicates = []
     
-    # Iteruj przez wiersze danych
-    for r_idx in range(start_row, len(values)):
-        # Check stop_event periodically
-        if stop_event is not None and stop_event.is_set():
-            return []
+    for target_col_idx in target_col_indices:
+        value_occurrences: Dict[str, List[Tuple[int, str]]] = {}
         
-        row = values[r_idx]
-        if row is None:
-            continue
-        
-        try:
-            cell_value = get_cell_value_safe(row, target_col_idx)
-            if cell_value is None or cell_value.strip() == "":
+        # Iteruj przez wiersze danych dla tej kolumny
+        for r_idx in range(start_row, len(values)):
+            # Check stop_event periodically
+            if stop_event is not None and stop_event.is_set():
+                return []
+            
+            row = values[r_idx]
+            if row is None:
                 continue
             
-            raw_value = cell_value
-            
-            # Normalizuj wartość
-            if normalize:
-                # Dla liczb użyj normalize_number_string
-                normalized = normalize_number_string(cell_value)
-                if not normalized:
-                    # Dla tekstu: strip + lowercase
-                    normalized = cell_value.strip().lower()
-            else:
-                normalized = cell_value
-            
-            # 1-based row index (API zwraca 0-based, ale wyświetlamy 1-based)
-            row_1based = r_idx + 1
-            
-            if normalized not in value_occurrences:
-                value_occurrences[normalized] = []
-            value_occurrences[normalized].append((row_1based, raw_value))
-            
-        except Exception as e:
-            logger.warning(
-                f"Błąd przetwarzania wiersza [{spreadsheet_name}] {sheet_name}!{r_idx+1}: {e}"
-            )
-            continue
+            try:
+                cell_value = get_cell_value_safe(row, target_col_idx)
+                if cell_value is None or cell_value.strip() == "":
+                    continue
+                
+                raw_value = cell_value
+                
+                # Normalizuj wartość
+                if normalize:
+                    # Dla liczb użyj normalize_number_string
+                    normalized = normalize_number_string(cell_value)
+                    if not normalized:
+                        # Dla tekstu: strip + lowercase
+                        normalized = cell_value.strip().lower()
+                else:
+                    normalized = cell_value
+                
+                # 1-based row index (API zwraca 0-based, ale wyświetlamy 1-based)
+                row_1based = r_idx + 1
+                
+                if normalized not in value_occurrences:
+                    value_occurrences[normalized] = []
+                value_occurrences[normalized].append((row_1based, raw_value))
+                
+            except Exception as e:
+                logger.warning(
+                    f"Błąd przetwarzania wiersza [{spreadsheet_name}] {sheet_name}!{r_idx+1}: {e}"
+                )
+                continue
+        
+        # Filtruj tylko duplikaty (count > 1) dla tej kolumny
+        for normalized_value, occurrences in value_occurrences.items():
+            if len(occurrences) > 1:
+                rows = [occ[0] for occ in occurrences]
+                sample_cells = [occ[1] for occ in occurrences[:5]]  # Max 5 przykładów
+                
+                # Użyj oryginalnej wartości z pierwszego wystąpienia
+                display_value = occurrences[0][1]
+                
+                # Dodaj informację o kolumnie (A1 notation) do nazwy kolumny jeśli jest wiele kolumn
+                column_display_name = search_column_name
+                if len(target_col_indices) > 1:
+                    column_display_name = f"{search_column_name} (kolumna {col_index_to_a1(target_col_idx)})"
+                
+                all_duplicates.append({
+                    "spreadsheetId": spreadsheet_id,
+                    "spreadsheetName": spreadsheet_name,
+                    "sheetName": sheet_name,
+                    "columnName": column_display_name,
+                    "value": display_value,
+                    "count": len(occurrences),
+                    "rows": rows,
+                    "sample_cells": sample_cells,
+                })
     
-    # Filtruj tylko duplikaty (count > 1)
-    duplicates = []
-    for normalized_value, occurrences in value_occurrences.items():
-        if len(occurrences) > 1:
-            rows = [occ[0] for occ in occurrences]
-            sample_cells = [occ[1] for occ in occurrences[:5]]  # Max 5 przykładów
-            
-            # Użyj oryginalnej wartości z pierwszego wystąpienia
-            display_value = occurrences[0][1]
-            
-            duplicates.append({
-                "spreadsheetId": spreadsheet_id,
-                "spreadsheetName": spreadsheet_name,
-                "sheetName": sheet_name,
-                "columnName": search_column_name,
-                "value": display_value,
-                "count": len(occurrences),
-                "rows": rows,
-                "sample_cells": sample_cells,
-            })
-    
-    return duplicates
+    return all_duplicates
 
 
 def find_duplicates_across_spreadsheets(
