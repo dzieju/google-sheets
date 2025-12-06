@@ -57,6 +57,13 @@ Aplikacja pozwala na wykluczenie określonych kolumn z wyszukiwania za pomocą p
 - **Priorytet**: Kolumny pasujące do wzorców ignorowania nie będą zwracane nawet jeśli pasują do zapytania
 - **Normalizacja**: Porównanie jest niewrażliwe na wielkość liter i białe znaki, tak jak w przypadku nazw kolumn
 
+### Wyświetlanie wyników
+Wszystkie wyniki wyszukiwania zawierają informację o arkuszu i nazwie zakładki:
+- **Tabela wyników**: Kolumna "Nazwa arkusza" pokazuje nazwę zakładki (np. "2025")
+- **Tabela duplikatów**: Kolumna "Arkusz / Zakładka" pokazuje pełną nazwę arkusza i zakładki
+- **Eksport JSON**: Każdy wynik zawiera pola `spreadsheetName` i `sheetName`
+- Dzięki temu można łatwo zidentyfikować źródło każdego wyniku
+
 ### Wykrywanie duplikatów
 Funkcja wykrywania duplikatów również obsługuje wiele kolumn:
 - Wykrywa duplikaty osobno w każdej kolumnie o podanej nazwie
@@ -74,11 +81,13 @@ Funkcja wykrywania duplikatów również obsługuje wiele kolumn:
 
 ## Changelog
 
-### v2.1 - Pole "Ignoruj" do wykluczania kolumn
+### v2.1 - Pole "Ignoruj" do wykluczania kolumn i wyświetlanie nazw arkuszy
 - **NOWOŚĆ**: Dodano pole "Ignoruj:" w interfejsie GUI do wykluczania określonych kolumn z wyszukiwania
 - **NOWOŚĆ**: Obsługa wielu wartości oddzielonych przecinkami, średnikami lub nowymi liniami
 - **NOWOŚĆ**: Wsparcie dla wildcardów: `pattern*` (prefix), `*pattern` (suffix), `*pattern*` (contains)
 - **NOWOŚĆ**: Kolumny pasujące do wzorców ignorowania nie są zwracane nawet jeśli pasują do zapytania
+- **NOWOŚĆ**: Wyniki wyświetlają nazwę arkusza/zakładki (np. "2025") w dedykowanej kolumnie
+- **NOWOŚĆ**: Eksport JSON zawiera pola `spreadsheetName` i `sheetName` dla każdego wyniku
 - Zachowana pełna kompatybilność wsteczna - puste pole "Ignoruj" zachowuje dotychczasowe zachowanie
 
 ### v2.0 - Obsługa wielu kolumn o tej samej nazwie
