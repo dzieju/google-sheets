@@ -154,7 +154,11 @@ class TestIgnorePatterns(unittest.TestCase):
         self.assertFalse(matches_ignore_pattern("production", patterns))
 
     def test_matches_ignore_pattern_normalized_header(self):
-        """Test: dopasowanie z normalizacją nagłówka (podkreślniki, spacje)."""
+        """Test: dopasowanie z normalizacją nagłówka (podkreślniki, spacje).
+        
+        matches_ignore_pattern wykorzystuje normalize_header_name, która zamienia
+        podkreślniki na spacje i redukuje wielokrotne spacje.
+        """
         # normalize_header_name zamienia '_' na ' ' i redukuje spacje
         result = matches_ignore_pattern("temp_column", ["temp column"])
         self.assertTrue(result)

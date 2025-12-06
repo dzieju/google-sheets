@@ -911,8 +911,11 @@ def search_in_sheet(
         # Szukamy konkretnej kolumny - znajdź WSZYSTKIE kolumny o tej nazwie (z filtrowaniem ignorowanych)
         target_col_indices = find_all_column_indices_by_name(header_row, search_column_name, ignore_patterns) if header_row else []
         if not target_col_indices:
-            # Kolumna nie istnieje lub wszystkie są ignorowane - nie zwracaj wyników dla tej zakładki
-            logger.debug(f"Kolumna '{search_column_name}' nie istnieje lub jest ignorowana w [{spreadsheet_name}] {sheet_name}")
+            # Kolumna nie istnieje lub wszystkie są ignorowane
+            if header_row and find_all_column_indices_by_name(header_row, search_column_name, None):
+                logger.debug(f"Wszystkie kolumny '{search_column_name}' są ignorowane w [{spreadsheet_name}] {sheet_name}")
+            else:
+                logger.debug(f"Kolumna '{search_column_name}' nie istnieje w [{spreadsheet_name}] {sheet_name}")
             return
     elif search_column_name is None:
         # Tryb strict - szukaj tylko 'numer zlecenia'
