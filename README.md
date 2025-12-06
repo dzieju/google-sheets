@@ -45,6 +45,18 @@ Aplikacja automatycznie wyszukuje **wszystkie kolumny** o podanej nazwie nagłó
 - **Ignorowanie białych znaków**: "Numer zlecenia" = "Numer  zlecenia" = " Numer zlecenia "
 - **Normalizacja podkreślników**: "numer_zlecenia" = "numer zlecenia"
 
+### Ignorowanie kolumn (pole "Ignoruj")
+Aplikacja pozwala na wykluczenie określonych kolumn z wyszukiwania za pomocą pola "Ignoruj:":
+- **Jak używać**: W interfejsie graficznym (GUI), w zakładce "Przeszukiwanie arkusza", znajduje się pole "Ignoruj" pod polem "Zapytanie"
+- **Format**: Wprowadź nazwy kolumn do ignorowania, oddzielone przecinkami, średnikami lub nowymi liniami
+- **Przykład**: `temp, debug, old` - ignoruje kolumny o nazwach "temp", "debug" i "old"
+- **Wildcards**: Obsługuje proste wzorce z gwiazdką (*):
+  - `temp*` - ignoruje kolumny zaczynające się na "temp" (np. "temporary", "temp_col")
+  - `*old` - ignoruje kolumny kończące się na "old" (np. "test_old", "old")
+  - `*debug*` - ignoruje kolumny zawierające "debug" (np. "debug_mode", "old_debug_temp")
+- **Priorytet**: Kolumny pasujące do wzorców ignorowania nie będą zwracane nawet jeśli pasują do zapytania
+- **Normalizacja**: Porównanie jest niewrażliwe na wielkość liter i białe znaki, tak jak w przypadku nazw kolumn
+
 ### Wykrywanie duplikatów
 Funkcja wykrywania duplikatów również obsługuje wiele kolumn:
 - Wykrywa duplikaty osobno w każdej kolumnie o podanej nazwie
@@ -61,6 +73,13 @@ Funkcja wykrywania duplikatów również obsługuje wiele kolumn:
 - Nie commituj `credentials.json` ani `token.json` do repo (dodane do .gitignore).
 
 ## Changelog
+
+### v2.1 - Pole "Ignoruj" do wykluczania kolumn
+- **NOWOŚĆ**: Dodano pole "Ignoruj:" w interfejsie GUI do wykluczania określonych kolumn z wyszukiwania
+- **NOWOŚĆ**: Obsługa wielu wartości oddzielonych przecinkami, średnikami lub nowymi liniami
+- **NOWOŚĆ**: Wsparcie dla wildcardów: `pattern*` (prefix), `*pattern` (suffix), `*pattern*` (contains)
+- **NOWOŚĆ**: Kolumny pasujące do wzorców ignorowania nie są zwracane nawet jeśli pasują do zapytania
+- Zachowana pełna kompatybilność wsteczna - puste pole "Ignoruj" zachowuje dotychczasowe zachowanie
 
 ### v2.0 - Obsługa wielu kolumn o tej samej nazwie
 - **NOWOŚĆ**: Wyszukiwanie znajduje i przeszukuje wszystkie kolumny o podanej nazwie nagłówka, nie tylko pierwszą

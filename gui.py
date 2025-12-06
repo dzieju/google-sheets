@@ -21,6 +21,7 @@ from sheets_search import (
     find_duplicates_in_sheet,
     find_duplicates_across_spreadsheets,
     ALL_COLUMNS_VALUES,
+    parse_ignore_patterns,
 )
 
 
@@ -228,7 +229,7 @@ def ss_load_sheets_thread(window, spreadsheet_id, spreadsheet_name):
         window.write_event_value(EVENT_ERROR, f"Błąd ładowania arkuszy: {e}")
 
 
-def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, pattern, regex, case_sensitive, all_sheets=False, search_column_name=None):
+def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, pattern, regex, case_sensitive, all_sheets=False, search_column_name=None, ignore_patterns=None):
     """Run search in a single sheet or all sheets in background thread."""
     global ss_stop_search_flag
     try:
@@ -249,6 +250,7 @@ def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, 
                 case_sensitive=case_sensitive,
                 search_column_name=search_column_name,
                 stop_event=ss_stop_search_flag,
+                ignore_patterns=ignore_patterns,
             )
         else:
             # Search in a single sheet
@@ -262,6 +264,7 @@ def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, 
                 case_sensitive=case_sensitive,
                 search_column_name=search_column_name,
                 stop_event=ss_stop_search_flag,
+                ignore_patterns=ignore_patterns,
             )
 
         for result in results_gen:
@@ -277,7 +280,7 @@ def ss_search_thread_func(window, spreadsheet_id, spreadsheet_name, sheet_name, 
         window.write_event_value(EVENT_SS_SEARCH_DONE, "error")
 
 
-def ss_search_all_spreadsheets_thread_func(window, pattern, regex, case_sensitive, search_column_name=None):
+def ss_search_all_spreadsheets_thread_func(window, pattern, regex, case_sensitive, search_column_name=None, ignore_patterns=None):
     """Run search across all user's spreadsheets in background thread."""
     global ss_stop_search_flag
     try:
@@ -297,6 +300,7 @@ def ss_search_all_spreadsheets_thread_func(window, pattern, regex, case_sensitiv
             search_column_name=search_column_name,
             spreadsheet_ids=None,  # None means search all spreadsheets
             stop_event=ss_stop_search_flag,
+            ignore_patterns=ignore_patterns,
         )
 
         for result in results_gen:
@@ -490,6 +494,8 @@ def create_single_sheet_search_tab():
         [sg.Input(key="-SHEET_COLUMN_INPUT-", default_text="", expand_x=True)],
         [sg.HorizontalSeparator()],
         [sg.Text("Zapytanie:"), sg.Input(key="-SHEET_QUERY-", expand_x=True)],
+        [sg.Text("Ignoruj (puste = brak, oddziel przecinkiem/średnikiem/nową linią, obsługuje wildcards *):")],
+        [sg.Multiline(key="-SHEET_IGNORE-", size=(None, 3), default_text="", expand_x=True)],
         [sg.Checkbox("Regex", key="-SHEET_REGEX-"), sg.Checkbox("Rozróżniaj wielkość liter", key="-SHEET_CASE-")],
         [
             sg.Button("Szukaj", key="-SHEET_SEARCH_BTN-"),
@@ -828,6 +834,10 @@ def main():
             selected_sheet = values["-SSHEETS_DROPDOWN-"]
             all_sheets_mode = values["-SHEET_ALL_SHEETS-"]
             column_input_value = values["-SHEET_COLUMN_INPUT-"].strip()
+            
+            # Parse ignore patterns from the Ignoruj field
+            ignore_input = values["-SHEET_IGNORE-"].strip()
+            ignore_patterns = parse_ignore_patterns(ignore_input) if ignore_input else None
 
             # When not selecting all spreadsheets, validate spreadsheet selection
             if not select_all_spreadsheets:
@@ -868,7 +878,8 @@ def main():
                         query,
                         values["-SHEET_REGEX-"],
                         values["-SHEET_CASE-"],
-                        search_column_name
+                        search_column_name,
+                        ignore_patterns
                     ),
                     daemon=True
                 )
@@ -903,7 +914,8 @@ def main():
                         values["-SHEET_REGEX-"],
                         values["-SHEET_CASE-"],
                         all_sheets_mode,
-                        search_column_name
+                        search_column_name,
+                        ignore_patterns
                     ),
                     daemon=True
                 )

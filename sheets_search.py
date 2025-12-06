@@ -172,6 +172,111 @@ def is_search_all_columns(search_column_name: Optional[str]) -> bool:
     return normalize_header_name(search_column_name) in ALL_COLUMNS_VALUES
 
 
+def parse_ignore_patterns(ignore_input: Optional[str]) -> List[str]:
+    """
+    Parsuje pole 'Ignoruj' na listę wzorców ignorowania.
+    
+    Obsługuje wiele wartości oddzielonych przecinkami, średnikami lub nowymi liniami.
+    Każda wartość jest normalizowana (trim + lowercase).
+    
+    Args:
+        ignore_input: Tekst z pola Ignoruj (może być None lub pusty)
+    
+    Returns:
+        Lista znormalizowanych wzorców ignorowania (pusta lista jeśli brak)
+    
+    Examples:
+        >>> parse_ignore_patterns("temp, test, debug")
+        ['temp', 'test', 'debug']
+        >>> parse_ignore_patterns("temp*\\ntest\\n*debug")
+        ['temp*', 'test', '*debug']
+        >>> parse_ignore_patterns(None)
+        []
+    """
+    if not ignore_input:
+        return []
+    
+    # Zamień średniki i nowe linie na przecinki
+    normalized = ignore_input.replace(';', ',').replace('\n', ',')
+    
+    # Podziel na części i wyczyść
+    patterns = []
+    for part in normalized.split(','):
+        part = part.strip()
+        if part:
+            # Normalizuj pattern (lowercase, ale zachowaj wildcards)
+            patterns.append(part.lower())
+    
+    return patterns
+
+
+def matches_ignore_pattern(header_name: str, ignore_patterns: List[str]) -> bool:
+    """
+    Sprawdza czy nazwa nagłówka pasuje do któregokolwiek wzorca ignorowania.
+    
+    Obsługuje proste wildcardy:
+    - "pattern*" - dopasowanie prefiksu (startsWith)
+    - "*pattern" - dopasowanie sufiksu (endsWith)
+    - "*pattern*" - dopasowanie podciągu (contains)
+    - "pattern" - dokładne dopasowanie
+    
+    Porównanie jest case-insensitive i po trim.
+    
+    Args:
+        header_name: Nazwa nagłówka kolumny do sprawdzenia
+        ignore_patterns: Lista wzorców ignorowania
+    
+    Returns:
+        True jeśli nagłówek pasuje do któregokolwiek wzorca
+    
+    Examples:
+        >>> matches_ignore_pattern("temporary", ["temp*"])
+        True
+        >>> matches_ignore_pattern("debug_mode", ["*debug*"])
+        True
+        >>> matches_ignore_pattern("test", ["test"])
+        True
+        >>> matches_ignore_pattern("production", ["temp*", "test*"])
+        False
+    """
+    if not ignore_patterns:
+        return False
+    
+    # Normalizuj nazwę nagłówka (trim + lowercase)
+    normalized_header = normalize_header_name(header_name)
+    
+    if not normalized_header:
+        return False
+    
+    for pattern in ignore_patterns:
+        pattern = pattern.strip().lower()
+        if not pattern:
+            continue
+        
+        # Obsługa wildcardów
+        if pattern.startswith('*') and pattern.endswith('*'):
+            # *pattern* - contains
+            search_term = pattern[1:-1]
+            if search_term and search_term in normalized_header:
+                return True
+        elif pattern.startswith('*'):
+            # *pattern - endsWith
+            search_term = pattern[1:]
+            if search_term and normalized_header.endswith(search_term):
+                return True
+        elif pattern.endswith('*'):
+            # pattern* - startsWith
+            search_term = pattern[:-1]
+            if search_term and normalized_header.startswith(search_term):
+                return True
+        else:
+            # Dokładne dopasowanie (po normalizacji)
+            if pattern == normalized_header:
+                return True
+    
+    return False
+
+
 def get_sheet_headers(sheets_service, spreadsheet_id: str, sheet_name: str) -> List[str]:
     """
     Pobiera nagłówki z arkusza - najpierw z wiersza 1, a jeśli pusty lub nie wygląda jak nagłówek,
@@ -343,16 +448,22 @@ def find_column_index_by_name(header_row: List[Any], column_name: str) -> Option
     return None
 
 
-def find_all_column_indices_by_name(header_row: List[Any], column_name: str) -> List[int]:
+def find_all_column_indices_by_name(
+    header_row: List[Any], 
+    column_name: str, 
+    ignore_patterns: Optional[List[str]] = None
+) -> List[int]:
     """
     Znajduje wszystkie indeksy kolumn pasujących do podanej nazwy (znormalizowanej, case-insensitive).
+    Opcjonalnie filtruje kolumny pasujące do wzorców ignorowania.
     
     Args:
         header_row: Lista wartości pierwszego wiersza (nagłówka)
         column_name: Nazwa kolumny do znalezienia
+        ignore_patterns: Opcjonalna lista wzorców ignorowania (z parse_ignore_patterns)
     
     Returns:
-        Lista indeksów wszystkich kolumn pasujących do nazwy (może być pusta)
+        Lista indeksów wszystkich kolumn pasujących do nazwy i nie pasujących do ignore_patterns
     """
     if not header_row or not column_name:
         return []
@@ -365,6 +476,9 @@ def find_all_column_indices_by_name(header_row: List[Any], column_name: str) -> 
             continue
         norm_cell = normalize_header_name(cell)
         if norm_cell == norm_target:
+            # Sprawdź czy kolumna nie jest ignorowana
+            if ignore_patterns and matches_ignore_pattern(str(cell), ignore_patterns):
+                continue  # Pomiń ignorowane kolumny
             matching_indices.append(idx)
     
     return matching_indices
@@ -613,6 +727,7 @@ def search_in_spreadsheet(
     case_sensitive: bool = False,
     search_column_name: Optional[str] = None,
     stop_event: Optional[threading.Event] = None,
+    ignore_patterns: Optional[List[str]] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Przeszukuje wszystkie zakładki w konkretnym arkuszu wg pattern.
@@ -626,6 +741,7 @@ def search_in_spreadsheet(
         case_sensitive: Czy rozróżniać wielkość liter
         search_column_name: Nazwa kolumny do przeszukania lub 'ALL'/'Wszystkie'
         stop_event: Opcjonalny obiekt threading.Event do sygnalizowania zatrzymania
+        ignore_patterns: Opcjonalna lista wzorców ignorowania (z parse_ignore_patterns)
     
     Zwraca generator wyników w formacie:
     {
@@ -673,6 +789,7 @@ def search_in_spreadsheet(
             search_column_name=search_column_name,
             spreadsheet_name=spreadsheet_name,
             stop_event=stop_event,
+            ignore_patterns=ignore_patterns,
         )
 
 
@@ -687,6 +804,7 @@ def search_in_sheet(
     search_column_name: Optional[str] = None,
     spreadsheet_name: Optional[str] = None,
     stop_event: Optional[threading.Event] = None,
+    ignore_patterns: Optional[List[str]] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Przeszukuje tylko wybraną zakładkę w konkretnym arkuszu wg pattern.
@@ -705,6 +823,8 @@ def search_in_sheet(
             - Jeśli None - tryb strict: przeszukuj tylko kolumnę 'numer zlecenia'
         spreadsheet_name: Opcjonalna nazwa arkusza (unika dodatkowego wywołania API)
         stop_event: Opcjonalny obiekt threading.Event do sygnalizowania zatrzymania
+        ignore_patterns: Opcjonalna lista wzorców ignorowania (z parse_ignore_patterns)
+            - Kolumny pasujące do wzorców są pomijane nawet jeśli pasują do search_column_name
     
     Zwraca generator wyników w formacie:
     {
@@ -788,11 +908,11 @@ def search_in_sheet(
     target_col_indices = []
     
     if not search_all and search_column_name is not None:
-        # Szukamy konkretnej kolumny - znajdź WSZYSTKIE kolumny o tej nazwie
-        target_col_indices = find_all_column_indices_by_name(header_row, search_column_name) if header_row else []
+        # Szukamy konkretnej kolumny - znajdź WSZYSTKIE kolumny o tej nazwie (z filtrowaniem ignorowanych)
+        target_col_indices = find_all_column_indices_by_name(header_row, search_column_name, ignore_patterns) if header_row else []
         if not target_col_indices:
-            # Kolumna nie istnieje - nie zwracaj wyników dla tej zakładki
-            logger.debug(f"Kolumna '{search_column_name}' nie istnieje w [{spreadsheet_name}] {sheet_name}")
+            # Kolumna nie istnieje lub wszystkie są ignorowane - nie zwracaj wyników dla tej zakładki
+            logger.debug(f"Kolumna '{search_column_name}' nie istnieje lub jest ignorowana w [{spreadsheet_name}] {sheet_name}")
             return
     elif search_column_name is None:
         # Tryb strict - szukaj tylko 'numer zlecenia'
@@ -800,6 +920,10 @@ def search_in_sheet(
         if zlecenie_idx is None:
             # Brak kolumny 'numer zlecenia' - nie zwracaj wyników
             logger.debug(f"Brak kolumny 'numer zlecenia' w [{spreadsheet_name}] {sheet_name}")
+            return
+        # Sprawdź czy kolumna 'numer zlecenia' nie jest ignorowana
+        if header_row and ignore_patterns and matches_ignore_pattern(str(header_row[zlecenie_idx]), ignore_patterns):
+            logger.debug(f"Kolumna 'numer zlecenia' jest ignorowana w [{spreadsheet_name}] {sheet_name}")
             return
         target_col_indices = [zlecenie_idx]
 
@@ -856,7 +980,7 @@ def search_in_sheet(
             return get_cell_value_safe(row, next_col_idx) or ""
 
     if search_all:
-        # Tryb 'ALL' - przeszukuj wszystkie kolumny
+        # Tryb 'ALL' - przeszukuj wszystkie kolumny (z pominięciem ignorowanych)
         for r_idx in range(start_row, len(values)):
             # Check stop_event periodically during row iteration
             if stop_event is not None and stop_event.is_set():
@@ -866,6 +990,11 @@ def search_in_sheet(
                 continue
             for c_idx, cell in enumerate(row):
                 try:
+                    # Sprawdź czy kolumna nie jest ignorowana
+                    if header_row and c_idx < len(header_row) and ignore_patterns:
+                        if matches_ignore_pattern(str(header_row[c_idx]), ignore_patterns):
+                            continue  # Pomiń ignorowane kolumny
+                    
                     # Obsługa None i konwersja do str
                     if cell is None:
                         cell_text = ""
@@ -933,6 +1062,7 @@ def search_across_spreadsheets(
     search_column_name: Optional[str] = None,
     spreadsheet_ids: Optional[List[str]] = None,
     stop_event: Optional[threading.Event] = None,
+    ignore_patterns: Optional[List[str]] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     Przeszukuje wiele arkuszy kalkulacyjnych wg pattern.
@@ -953,6 +1083,7 @@ def search_across_spreadsheets(
         search_column_name: Nazwa kolumny do przeszukania lub 'ALL'/'Wszystkie'
         spreadsheet_ids: Lista ID arkuszy do przeszukania lub None (wszystkie)
         stop_event: Opcjonalny obiekt threading.Event do sygnalizowania zatrzymania
+        ignore_patterns: Opcjonalna lista wzorców ignorowania (z parse_ignore_patterns)
     
     Yields:
         Wyniki w formacie:
@@ -995,6 +1126,7 @@ def search_across_spreadsheets(
                 case_sensitive=case_sensitive,
                 search_column_name=search_column_name,
                 stop_event=stop_event,
+                ignore_patterns=ignore_patterns,
             )
             for result in results_gen:
                 # Check stop_event after each result
