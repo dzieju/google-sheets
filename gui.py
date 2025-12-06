@@ -478,9 +478,9 @@ def create_settings_tab():
 def create_single_sheet_search_tab():
     """Create Single Sheet Search tab layout."""
     # Definicja kolumn tabeli wyników
-    table_headings = ["Arkusz kalkulacyjny", "Zakładka", "Zlecenie", "Stawka"]
+    table_headings = ["Arkusz kalkulacyjny", "Nazwa arkusza", "Zlecenie", "Stawka"]
     # Definicja kolumn tabeli duplikatów
-    dup_table_headings = ["Arkusz", "Kolumna", "Wartość", "Ile razy", "Przykładowe wiersze"]
+    dup_table_headings = ["Arkusz / Zakładka", "Kolumna", "Wartość", "Ile razy", "Przykładowe wiersze"]
     
     return [
         [sg.Text("Przeszukiwanie pojedynczego arkusza", font=("Helvetica", 12, "bold"))],
@@ -494,7 +494,8 @@ def create_single_sheet_search_tab():
         [sg.Input(key="-SHEET_COLUMN_INPUT-", default_text="", expand_x=True)],
         [sg.HorizontalSeparator()],
         [sg.Text("Zapytanie:"), sg.Input(key="-SHEET_QUERY-", expand_x=True)],
-        [sg.Text("Ignoruj (puste = brak, oddziel przecinkiem/średnikiem/nową linią, obsługuje wildcards *):")],
+        [sg.Text("Ignoruj:", font=("Helvetica", 9, "bold"))],
+        [sg.Text("Oddzielaj przecinkami, średnikami lub nową linią; wspiera '*' jako wildcard", font=("Helvetica", 8))],
         [sg.Multiline(key="-SHEET_IGNORE-", size=(None, 3), default_text="", expand_x=True)],
         [sg.Checkbox("Regex", key="-SHEET_REGEX-"), sg.Checkbox("Rozróżniaj wielkość liter", key="-SHEET_CASE-")],
         [
