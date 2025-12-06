@@ -785,7 +785,7 @@ def search_in_sheet(
     
     # Określ tryb wyszukiwania
     search_all = is_search_all_columns(search_column_name)
-    target_col_indices = []  # Changed from single index to list of indices
+    target_col_indices = []
     
     if not search_all and search_column_name is not None:
         # Szukamy konkretnej kolumny - znajdź WSZYSTKIE kolumny o tej nazwie
@@ -891,7 +891,7 @@ def search_in_sheet(
                     )
                     continue
     else:
-        # Tryb konkretnej kolumny (target_col_indices zawiera listę wszystkich kolumn do przeszukania)
+        # Iterate through all matching columns
         for r_idx in range(start_row, len(values)):
             # Check stop_event periodically during row iteration
             if stop_event is not None and stop_event.is_set():
@@ -1088,11 +1088,11 @@ def find_duplicates_in_sheet(
         logger.debug(f"Kolumna '{search_column_name}' nie istnieje w [{spreadsheet_name}] {sheet_name}")
         return []
     
-    # Słownik do zbierania wartości: (col_idx, normalized_value) -> [(row_index_1based, raw_value), ...]
-    # Grupujemy per kolumna, aby wykrywać duplikaty w ramach każdej kolumny osobno
+    # Detect duplicates separately in each matching column
     all_duplicates = []
     
     for target_col_idx in target_col_indices:
+        # Map normalized values to their occurrences: normalized_value -> [(row_index_1based, raw_value), ...]
         value_occurrences: Dict[str, List[Tuple[int, str]]] = {}
         
         # Iteruj przez wiersze danych dla tej kolumny
