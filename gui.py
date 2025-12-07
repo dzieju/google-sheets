@@ -60,6 +60,7 @@ EVENT_DUP_DONE = "-DUP_DONE-"
 EVENT_QUADRA_FILES_LOADED = "-QUADRA_FILES_LOADED-"
 EVENT_QUADRA_SHEETS_LOADED = "-QUADRA_SHEETS_LOADED-"
 EVENT_QUADRA_CHECK_DONE = "-QUADRA_CHECK_DONE-"
+EVENT_QUADRA_MISSING_DONE = "-QUADRA_MISSING_DONE-"
 
 # -------------------- Global state --------------------
 drive_service = None
@@ -530,6 +531,133 @@ def quadra_check_thread_func(window, dbf_path, dbf_column, spreadsheet_id, mode,
         window.write_event_value(EVENT_QUADRA_CHECK_DONE, "error")
 
 
+def quadra_find_missing_thread_func(window, dbf_path, dbf_column, spreadsheet_id, sheet_name, sheet_column, skip_header, numeric_only):
+    """
+    Find values from Google Sheet column that are missing in DBF file.
+    
+    This function compares values from a specified column in a Google Sheet
+    with values from a DBF file and identifies which sheet values are not present in the DBF.
+    
+    Normalization behavior:
+    - All values are trimmed and converted to lowercase
+    - If numeric_only is True: removes all non-digit characters before comparison
+      (useful for comparing order numbers that might have different formatting)
+    
+    Args:
+        window: GUI window for sending events
+        dbf_path: Path to DBF file
+        dbf_column: Column identifier in DBF (e.g., 'B', 1)
+        spreadsheet_id: Google Spreadsheet ID
+        sheet_name: Name of the sheet tab to check
+        sheet_column: Column letter in the sheet (e.g., 'A', 'B')
+        skip_header: Whether to skip the first row (header)
+        numeric_only: Whether to compare only numeric digits
+    """
+    try:
+        if sheets_service is None:
+            window.write_event_value(EVENT_ERROR, "Najpierw zaloguj się.")
+            window.write_event_value(EVENT_QUADRA_MISSING_DONE, "error")
+            return
+        
+        # Read DBF column values
+        try:
+            # Try to use read_dbf_column first
+            try:
+                dbf_values = read_dbf_column(dbf_path, dbf_column)
+            except Exception:
+                # Fallback to read_dbf_records_with_extra_fields
+                dbf_records = read_dbf_records_with_extra_fields(dbf_path, dbf_column)
+                dbf_values = [rec['value'] for rec in dbf_records if rec.get('value')]
+            
+            if not dbf_values:
+                window.write_event_value(EVENT_ERROR, "Brak wartości w wybranej kolumnie DBF.")
+                window.write_event_value(EVENT_QUADRA_MISSING_DONE, "error")
+                return
+                
+        except Exception as e:
+            window.write_event_value(EVENT_ERROR, f"Błąd odczytu pliku DBF: {e}")
+            window.write_event_value(EVENT_QUADRA_MISSING_DONE, "error")
+            return
+        
+        # Normalize DBF values and create a set for fast lookup
+        def normalize_value(val, numeric_only_mode):
+            """Normalize value for comparison."""
+            if val is None:
+                return ""
+            s = str(val).strip().lower()
+            if numeric_only_mode:
+                # Remove all non-digit characters
+                s = ''.join(c for c in s if c.isdigit())
+            return s
+        
+        dbf_set = {normalize_value(v, numeric_only) for v in dbf_values if v}
+        dbf_set.discard('')  # Remove empty strings
+        
+        # Read values from Google Sheet column
+        try:
+            # Build range: SheetName!COLUMN:COLUMN (e.g., "Sheet1!A:A")
+            range_notation = f"{sheet_name}!{sheet_column}:{sheet_column}"
+            
+            result = sheets_service.spreadsheets().values().get(
+                spreadsheetId=spreadsheet_id,
+                range=range_notation,
+                majorDimension='COLUMNS'
+            ).execute()
+            
+            sheet_values_raw = result.get('values', [[]])[0] if result.get('values') else []
+            
+            if not sheet_values_raw:
+                window.write_event_value(EVENT_ERROR, f"Brak wartości w kolumnie {sheet_column} arkusza {sheet_name}.")
+                window.write_event_value(EVENT_QUADRA_MISSING_DONE, "error")
+                return
+            
+            # Skip header if requested
+            if skip_header and len(sheet_values_raw) > 0:
+                sheet_values_raw = sheet_values_raw[1:]
+            
+        except Exception as e:
+            window.write_event_value(EVENT_ERROR, f"Błąd odczytu arkusza Google: {e}")
+            window.write_event_value(EVENT_QUADRA_MISSING_DONE, "error")
+            return
+        
+        # Normalize sheet values
+        sheet_values_normalized = []
+        sheet_values_original = []
+        for val in sheet_values_raw:
+            if val:
+                normalized = normalize_value(val, numeric_only)
+                if normalized:  # Only add non-empty normalized values
+                    sheet_values_normalized.append(normalized)
+                    sheet_values_original.append(str(val).strip())
+        
+        # Find missing values (in sheet but not in DBF)
+        sheet_set = set(sheet_values_normalized)
+        missing_normalized = sheet_set - dbf_set
+        
+        # Map back to original values
+        missing_original = []
+        for i, norm_val in enumerate(sheet_values_normalized):
+            if norm_val in missing_normalized:
+                missing_original.append(sheet_values_original[i])
+        
+        # Sort for consistent output
+        missing_original.sort()
+        
+        # Prepare results
+        results = {
+            'missing_count': len(missing_original),
+            'missing_values': missing_original,
+            'total_sheet_values': len(sheet_values_original),
+            'total_dbf_values': len(dbf_set)
+        }
+        
+        window.write_event_value(EVENT_QUADRA_MISSING_DONE, results)
+        
+    except Exception as e:
+        window.write_event_value(EVENT_ERROR, f"Błąd sprawdzania brakujących wartości: {e}")
+        window.write_event_value(EVENT_QUADRA_MISSING_DONE, "error")
+
+
 # -------------------- GUI Layout --------------------
 def create_auth_tab():
     """Create Authorization tab layout."""
@@ -696,6 +824,16 @@ def create_quadra_tab():
         # Action buttons
         [sg.Button("Sprawdź", key="-QUADRA_CHECK_BTN-", size=(15, 1)),
          sg.Button("Zatrzymaj", key="-QUADRA_STOP_BTN-", disabled=True, size=(15, 1))],
+        
+        [sg.HorizontalSeparator()],
+        
+        # New feature: Find missing values in DBF
+        [sg.Text("Znajdź brakujące w DBF:", font=("Helvetica", 10, "bold"))],
+        [sg.Text("Kolumna w arkuszu:", size=(20, 1)), sg.Input(key="-QUADRA_SHEET_COLUMN-", size=(10, 1), default_text="A"),
+         sg.Text("(np. A, B, C...)")],
+        [sg.Checkbox("Pomiń nagłówek", key="-QUADRA_SKIP_HEADER-", default=True),
+         sg.Checkbox("Tylko cyfry", key="-QUADRA_NUMERIC_ONLY-", default=False)],
+        [sg.Button("Znajdź brakujące w DBF", key="-QUADRA_FIND_MISSING_BTN-", size=(25, 1))],
         
         [sg.HorizontalSeparator()],
         
@@ -1517,6 +1655,112 @@ def main():
         elif event == "-QUADRA_STOP_BTN-":
             quadra_stop_flag.set()
             window["-STATUS_BAR-"].update("Zatrzymywanie sprawdzania...")
+
+        elif event == "-QUADRA_FIND_MISSING_BTN-":
+            # Validate inputs
+            dbf_path = values["-QUADRA_DBF_PATH-"].strip()
+            if not dbf_path:
+                sg.popup_error("Wybierz plik DBF.")
+                continue
+            
+            dbf_column = values["-QUADRA_DBF_COLUMN-"].strip()
+            if not dbf_column:
+                sg.popup_error("Podaj kolumnę DBF (np. B).")
+                continue
+            
+            selected_spreadsheet = values["-QUADRA_SPREADSHEET_DROPDOWN-"]
+            if not selected_spreadsheet:
+                sg.popup_error("Wybierz arkusz kalkulacyjny z listy.")
+                continue
+            
+            # Get spreadsheet ID
+            try:
+                combo_values = window["-QUADRA_SPREADSHEET_DROPDOWN-"].Values
+                idx = combo_values.index(selected_spreadsheet)
+                file_info = quadra_current_spreadsheets[idx]
+                spreadsheet_id = file_info["id"]
+                spreadsheet_name = file_info["name"]
+            except (ValueError, IndexError):
+                sg.popup_error("Błąd: nie można znaleźć wybranego arkusza.")
+                continue
+            
+            # Check if a single sheet is selected (not "Wszystkie zakładki")
+            all_sheets = values["-QUADRA_ALL_SHEETS-"]
+            if all_sheets:
+                sg.popup_error("Proszę wybrać pojedynczą zakładkę (odznacz 'Wszystkie zakładki').")
+                continue
+            
+            selected_sheet = values["-QUADRA_SHEETS_DROPDOWN-"]
+            if not selected_sheet:
+                sg.popup_error("Wybierz zakładkę z listy.")
+                continue
+            
+            sheet_column = values["-QUADRA_SHEET_COLUMN-"].strip()
+            if not sheet_column:
+                sg.popup_error("Podaj kolumnę w arkuszu (np. A).")
+                continue
+            
+            skip_header = values["-QUADRA_SKIP_HEADER-"]
+            numeric_only = values["-QUADRA_NUMERIC_ONLY-"]
+            
+            # Disable button during processing
+            window["-QUADRA_FIND_MISSING_BTN-"].update(disabled=True)
+            window["-STATUS_BAR-"].update(f"Szukanie brakujących wartości w {spreadsheet_name}...")
+            
+            # Start background thread
+            threading.Thread(
+                target=quadra_find_missing_thread_func,
+                args=(
+                    window,
+                    dbf_path,
+                    dbf_column,
+                    spreadsheet_id,
+                    selected_sheet,
+                    sheet_column,
+                    skip_header,
+                    numeric_only
+                ),
+                daemon=True
+            ).start()
+
+        elif event == EVENT_QUADRA_MISSING_DONE:
+            window["-QUADRA_FIND_MISSING_BTN-"].update(disabled=False)
+            
+            results = values[EVENT_QUADRA_MISSING_DONE]
+            if results == "error":
+                window["-STATUS_BAR-"].update("Wyszukiwanie zakończone z błędem.")
+            else:
+                # Store full results in metadata for future export
+                if not hasattr(window, 'metadata'):
+                    window.metadata = {}
+                window.metadata['quadra_missing_results'] = results.get('missing_values', [])
+                
+                # Show popup with results
+                missing_count = results.get('missing_count', 0)
+                total_sheet = results.get('total_sheet_values', 0)
+                total_dbf = results.get('total_dbf_values', 0)
+                missing_values = results.get('missing_values', [])
+                
+                # Show first 200 values in popup
+                preview_count = min(200, len(missing_values))
+                preview_values = missing_values[:preview_count]
+                
+                popup_message = f"Analiza zakończona:\n\n"
+                popup_message += f"Wartości w arkuszu: {total_sheet}\n"
+                popup_message += f"Wartości w DBF: {total_dbf}\n"
+                popup_message += f"Brakujących w DBF: {missing_count}\n\n"
+                
+                if missing_count > 0:
+                    popup_message += f"Pierwsze {preview_count} brakujących wartości:\n"
+                    popup_message += "\n".join(preview_values)
+                    if missing_count > preview_count:
+                        popup_message += f"\n\n... i {missing_count - preview_count} więcej"
+                    popup_message += f"\n\nPełna lista zapisana w metadata dla przyszłego eksportu."
+                else:
+                    popup_message += "Wszystkie wartości z arkusza znajdują się w DBF."
+                
+                sg.popup_scrolled(popup_message, title="Wynik wyszukiwania brakujących", size=(60, 30))
+                window["-STATUS_BAR-"].update(f"Znaleziono {missing_count} brakujących wartości.")
 
         elif event == EVENT_QUADRA_CHECK_DONE:
             window["-QUADRA_CHECK_BTN-"].update(disabled=False)
