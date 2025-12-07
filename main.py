@@ -5,11 +5,12 @@ Prosty CLI do listowania i przeszukiwania arkuszy.
 
 import argparse
 import json
+from typing import Optional, Union, Dict, List, Any
 from google_auth import build_services
 from sheets_search import list_spreadsheets_owned_by_me, search_in_spreadsheets
 
 
-def parse_column_names_arg(column_names_str):
+def parse_column_names_arg(column_names_str: Optional[str]) -> Optional[Union[Dict[str, str], List[str]]]:
     """
     Parse --column-names argument which can be:
     - JSON object string: '{"spreadsheetId": "ID arkusza", "sheetName": "Nazwa"}'
@@ -38,7 +39,10 @@ def parse_column_names_arg(column_names_str):
     return None
 
 
-def map_result_keys(result, column_names):
+def map_result_keys(
+    result: Dict[str, Any],
+    column_names: Optional[Union[Dict[str, str], List[str]]]
+) -> Dict[str, Any]:
     """
     Map result dictionary keys to custom column names.
     

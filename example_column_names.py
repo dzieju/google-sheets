@@ -104,8 +104,7 @@ def example_partial_list_mapping():
         'Cena',
         'Status',
         'Arkusz',
-        'Kolumna'
-        # Remaining columns will use default names
+        'Kolumna',  # Remaining columns will use default names
     ]
     
     csv_output = export_quadra_results_to_csv(sample_results, column_names=column_names)
