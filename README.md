@@ -87,17 +87,131 @@ Funkcja wykrywania duplikatów również obsługuje wiele kolumn:
 - Wykrywa duplikaty osobno w każdej kolumnie o podanej nazwie
 - W wynikach rozróżnia kolumny dodając informację o literze kolumny (np. "Numer zlecenia (kolumna B)")
 
+## Funkcja Quadra - Sprawdzanie numerów zleceń z DBF
+
+Zakładka "Quadra" pozwala na porównanie numerów zleceń z pliku DBF z zawartością arkuszy Google Sheets.
+
+### Jak używać Quadra
+
+1. **Wybierz plik DBF**:
+   - Kliknij "Wybierz plik DBF" aby wskazać plik z numerami zleceń
+   - Domyślnie aplikacja wczytuje kolumnę B (można zmienić w polu "Kolumna DBF")
+
+2. **Podaj kolumnę DBF**:
+   - Wpisz literę kolumny (np. "B", "C") lub numer (np. "1", "2")
+   - Domyślnie: "B" (druga kolumna)
+
+3. **Wybierz arkusz kalkulacyjny**:
+   - Kliknij "Odśwież listę arkuszy" aby załadować dostępne arkusze
+   - Wybierz arkusz z listy rozwijanej
+
+4. **Wybierz zakładki do przeszukania**:
+   - Zaznacz "Wszystkie zakładki" aby przeszukać wszystkie (domyślnie)
+   - Lub wybierz konkretną zakładkę z listy
+
+5. **Opcje wyszukiwania**:
+   - **Exact**: Dopasowanie dokładne (ignoruje białe znaki, wielkość liter, porównuje liczby)
+   - **Substring**: Dopasowanie podciągu (jedna wartość zawiera drugą)
+   - **Kolumny do przeszukania**: Pozostaw puste aby przeszukać wszystkie kolumny, lub podaj nazwy kolumn oddzielone przecinkami
+
+6. **Sprawdź**:
+   - Kliknij "Sprawdź" aby rozpocząć porównanie
+   - Wyniki pojawią się w tabeli z następującymi kolumnami:
+     - **Numer z DBF**: Wartość z pliku DBF
+     - **Status**: "Found" (znaleziono) lub "Missing" (brakuje)
+     - **Arkusz**: Nazwa zakładki gdzie znaleziono wartość
+     - **Kolumna**: Nazwa kolumny gdzie znaleziono wartość
+     - **Wiersz**: Numer wiersza gdzie znaleziono wartość
+     - **Uwagi**: Dodatkowe informacje
+
+7. **Eksport wyników**:
+   - **Eksportuj JSON**: Zapisz wyniki w formacie JSON
+   - **Eksportuj CSV**: Zapisz wyniki w formacie CSV
+
+### Przykładowe użycie
+
+```
+1. Masz plik DBF z numerami zleceń w kolumnie B: 12345, 67890, ABC-001
+2. Chcesz sprawdzić czy te numery są w arkuszu Google "Zlecenia 2025"
+3. W zakładce Quadra:
+   - Wybierz plik DBF
+   - Zostaw "B" jako kolumnę
+   - Wybierz arkusz "Zlecenia 2025"
+   - Zaznacz "Wszystkie zakładki"
+   - Kliknij "Sprawdź"
+4. Wyniki pokażą które numery zostały znalezione i gdzie, a które brakują
+```
+
+### Dopasowanie wartości
+
+- **Tryb Exact** (domyślny):
+  - Ignoruje białe znaki i wielkość liter
+  - Porównuje wartości numeryczne jako liczby (np. "12345" = 12345)
+  - Normalizuje formatowanie liczb (usuwa spacje, separatory tysięcy)
+
+- **Tryb Substring**:
+  - Sprawdza czy jedna wartość zawiera drugą
+  - Przydatne gdy numery w arkuszu mają dodatkowe przedrostki/przyrostki
+
+### Struktura eksportowanych danych
+
+**JSON**:
+```json
+[
+  {
+    "dbfValue": "12345",
+    "status": "Found",
+    "sheetName": "2025",
+    "columnName": "Numer zlecenia",
+    "columnIndex": 1,
+    "rowIndex": 5,
+    "matchedValue": "12345",
+    "notes": "Found in 2025 at B6"
+  },
+  {
+    "dbfValue": "99999",
+    "status": "Missing",
+    "sheetName": "",
+    "columnName": "",
+    "columnIndex": null,
+    "rowIndex": null,
+    "matchedValue": "",
+    "notes": "Missing"
+  }
+]
+```
+
+**CSV**:
+```
+DBF_Value,Status,SheetName,ColumnName,ColumnIndex,RowIndex,MatchedValue,Notes
+12345,Found,2025,Numer zlecenia,1,5,12345,Found in 2025 at B6
+99999,Missing,,,,,Missing
+```
+
 ## Pliki
 - main.py — CLI
 - google_auth.py — obsługa OAuth i tworzenie klienta Sheets/Drive
 - sheets_search.py — logika listowania i przeszukiwania arkuszy
 - gui.py — graficzny interfejs użytkownika (GUI)
+- quadra_service.py — moduł do sprawdzania numerów z DBF w arkuszach Google Sheets
 
 ## Uwagi
 - Aplikacja odczytuje całe arkusze (może być wolne przy bardzo dużych plikach). Możemy później dodać ograniczenia rozmiaru, progi lub przetwarzanie strumieniowe.
 - Nie commituj `credentials.json` ani `token.json` do repo (dodane do .gitignore).
 
 ## Changelog
+
+### v3.0 - Quadra: Sprawdzanie numerów zleceń z DBF
+- **NOWOŚĆ**: Dodano zakładkę "Quadra" do sprawdzania numerów zleceń z plików DBF
+- **NOWOŚĆ**: Obsługa plików DBF - wczytywanie wartości z wybranej kolumny (domyślnie B)
+- **NOWOŚĆ**: Porównywanie wartości z DBF z zawartością arkuszy Google Sheets
+- **NOWOŚĆ**: Dwa tryby dopasowania: Exact (dokładne, z normalizacją) i Substring (podciąg)
+- **NOWOŚĆ**: Wyniki pokazują status (Found/Missing), arkusz, kolumnę, wiersz i uwagi
+- **NOWOŚĆ**: Eksport wyników do JSON i CSV
+- **NOWOŚĆ**: Możliwość ograniczenia wyszukiwania do wybranych zakładek i kolumn
+- **NOWOŚĆ**: Moduł `quadra_service.py` z logiką obsługi DBF i porównywania
+- Dodano 23 testy jednostkowe dla modułu Quadra
+- Dodano zależność `dbfread>=2.0.7` do requirements.txt
 
 ### v2.3 - Ignorowanie wartości komórek oraz nowa semantyka wzorców
 - **NOWOŚĆ**: Pole "Ignoruj" filtruje teraz również **wartości dopasowanych komórek**, nie tylko nagłówki kolumn

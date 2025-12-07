@@ -6,6 +6,7 @@ Wykorzystuje istniejące moduły google_auth i sheets_search.
 
 import json
 import os
+import re
 import threading
 
 import FreeSimpleGUI as sg
@@ -23,6 +24,13 @@ from sheets_search import (
     ALL_COLUMNS_VALUES,
     parse_ignore_patterns,
     parse_header_rows,
+)
+from quadra_service import (
+    read_dbf_column,
+    search_dbf_values_in_sheets,
+    format_quadra_result_for_table,
+    export_quadra_results_to_json,
+    export_quadra_results_to_csv,
 )
 
 
@@ -42,6 +50,10 @@ EVENT_SS_SEARCH_DONE = "-SS_SEARCH_DONE-"
 # Events for duplicate detection
 EVENT_DUP_RESULT = "-DUP_RESULT-"
 EVENT_DUP_DONE = "-DUP_DONE-"
+# Events for Quadra tab
+EVENT_QUADRA_FILES_LOADED = "-QUADRA_FILES_LOADED-"
+EVENT_QUADRA_SHEETS_LOADED = "-QUADRA_SHEETS_LOADED-"
+EVENT_QUADRA_CHECK_DONE = "-QUADRA_CHECK_DONE-"
 
 # -------------------- Global state --------------------
 drive_service = None
@@ -57,6 +69,11 @@ ss_stop_search_flag = threading.Event()
 # Global state for duplicate detection
 dup_search_thread = None
 dup_stop_search_flag = threading.Event()
+# Global state for Quadra tab
+quadra_current_spreadsheets = []
+quadra_current_sheets = []
+quadra_check_thread = None
+quadra_stop_flag = threading.Event()
 
 
 # -------------------- Helper functions --------------------
@@ -424,6 +441,86 @@ def dup_search_all_spreadsheets_thread_func(window, search_column_name):
         window.write_event_value(EVENT_DUP_DONE, "error")
 
 
+# -------------------- Quadra Thread Functions --------------------
+def quadra_load_files_thread(window):
+    """Load spreadsheets list for Quadra tab."""
+    global quadra_current_spreadsheets
+    try:
+        if drive_service is None:
+            window.write_event_value(EVENT_ERROR, "Najpierw zaloguj się.")
+            return
+        files = list_spreadsheets_owned_by_me(drive_service)
+        quadra_current_spreadsheets = files
+        window.write_event_value(EVENT_QUADRA_FILES_LOADED, files)
+    except Exception as e:
+        window.write_event_value(EVENT_ERROR, f"Błąd ładowania plików: {e}")
+
+
+def quadra_load_sheets_thread(window, spreadsheet_id, spreadsheet_name):
+    """Load sheet names for selected spreadsheet in Quadra tab."""
+    global quadra_current_sheets
+    try:
+        if sheets_service is None:
+            window.write_event_value(EVENT_ERROR, "Najpierw zaloguj się.")
+            return
+        meta = sheets_service.spreadsheets().get(
+            spreadsheetId=spreadsheet_id, fields="sheets.properties"
+        ).execute()
+        sheet_names = [sh["properties"]["title"] for sh in meta.get("sheets", [])]
+        quadra_current_sheets = sheet_names
+        window.write_event_value(EVENT_QUADRA_SHEETS_LOADED, {
+            "id": spreadsheet_id,
+            "name": spreadsheet_name,
+            "sheets": sheet_names
+        })
+    except Exception as e:
+        window.write_event_value(EVENT_ERROR, f"Błąd ładowania arkuszy: {e}")
+
+
+def quadra_check_thread_func(window, dbf_path, dbf_column, spreadsheet_id, mode, sheet_names, column_names):
+    """Run Quadra check in background thread."""
+    global quadra_stop_flag
+    try:
+        if sheets_service is None:
+            window.write_event_value(EVENT_ERROR, "Najpierw zaloguj się.")
+            return
+        
+        quadra_stop_flag.clear()
+        
+        # Read DBF file
+        try:
+            dbf_values = read_dbf_column(dbf_path, dbf_column)
+            if not dbf_values:
+                window.write_event_value(EVENT_ERROR, "Brak wartości w wybranej kolumnie DBF.")
+                window.write_event_value(EVENT_QUADRA_CHECK_DONE, "error")
+                return
+        except Exception as e:
+            window.write_event_value(EVENT_ERROR, f"Błąd odczytu pliku DBF: {e}")
+            window.write_event_value(EVENT_QUADRA_CHECK_DONE, "error")
+            return
+        
+        # Search in Google Sheets
+        try:
+            results = search_dbf_values_in_sheets(
+                drive_service=drive_service,
+                sheets_service=sheets_service,
+                dbf_values=dbf_values,
+                spreadsheet_id=spreadsheet_id,
+                mode=mode,
+                sheet_names=sheet_names,
+                column_names=column_names,
+                header_row_index=0
+            )
+            window.write_event_value(EVENT_QUADRA_CHECK_DONE, results)
+        except Exception as e:
+            window.write_event_value(EVENT_ERROR, f"Błąd przeszukiwania arkuszy: {e}")
+            window.write_event_value(EVENT_QUADRA_CHECK_DONE, "error")
+    
+    except Exception as e:
+        window.write_event_value(EVENT_ERROR, f"Błąd sprawdzania Quadra: {e}")
+        window.write_event_value(EVENT_QUADRA_CHECK_DONE, "error")
+
+
 # -------------------- GUI Layout --------------------
 def create_auth_tab():
     """Create Authorization tab layout."""
@@ -542,16 +639,85 @@ def create_single_sheet_search_tab():
     ]
 
 
+def create_quadra_tab():
+    """Create Quadra tab layout for checking DBF order numbers against Google Sheets."""
+    table_headings = ["Numer z DBF", "Status", "Arkusz", "Kolumna", "Wiersz", "Uwagi"]
+    
+    return [
+        [sg.Text("Quadra: Sprawdzanie numerów zleceń z DBF", font=("Helvetica", 12, "bold"))],
+        [sg.HorizontalSeparator()],
+        
+        # DBF file selection
+        [sg.Text("Plik DBF:", size=(15, 1)), sg.Input(key="-QUADRA_DBF_PATH-", expand_x=True, readonly=True), 
+         sg.FileBrowse("Wybierz plik DBF", key="-QUADRA_DBF_BROWSE-", file_types=(("DBF Files", "*.dbf"), ("All Files", "*.*")))],
+        [sg.Text("Kolumna DBF:", size=(15, 1)), sg.Input(key="-QUADRA_DBF_COLUMN-", default_text="B", size=(10, 1)),
+         sg.Text("(litera A, B, C... lub numer 1, 2, 3...)")],
+        
+        [sg.HorizontalSeparator()],
+        
+        # Spreadsheet selection
+        [sg.Button("Odśwież listę arkuszy", key="-QUADRA_REFRESH_FILES-")],
+        [sg.Text("Wybierz arkusz kalkulacyjny:")],
+        [sg.Combo(values=[], key="-QUADRA_SPREADSHEET_DROPDOWN-", enable_events=True, readonly=True, expand_x=True)],
+        [sg.Text("Wybierz zakładki:"), sg.Checkbox("Wszystkie zakładki", key="-QUADRA_ALL_SHEETS-", default=True, enable_events=True)],
+        [sg.Combo(values=[], key="-QUADRA_SHEETS_DROPDOWN-", enable_events=True, readonly=True, expand_x=True, disabled=True)],
+        
+        [sg.HorizontalSeparator()],
+        
+        # Search options
+        [sg.Text("Opcje wyszukiwania:")],
+        [sg.Radio("Exact (trim, case-insensitive, numeric)", "QUADRA_MODE", key="-QUADRA_EXACT-", default=True),
+         sg.Radio("Substring", "QUADRA_MODE", key="-QUADRA_SUBSTRING-")],
+        [sg.Text("Kolumny do przeszukania (puste = wszystkie):")],
+        [sg.Input(key="-QUADRA_COLUMN_FILTER-", expand_x=True)],
+        
+        [sg.HorizontalSeparator()],
+        
+        # Action buttons
+        [sg.Button("Sprawdź", key="-QUADRA_CHECK_BTN-", size=(15, 1)),
+         sg.Button("Zatrzymaj", key="-QUADRA_STOP_BTN-", disabled=True, size=(15, 1))],
+        
+        [sg.HorizontalSeparator()],
+        
+        # Results table
+        [sg.Text("Wyniki:", font=("Helvetica", 10, "bold"))],
+        [sg.Table(
+            values=[],
+            headings=table_headings,
+            key="-QUADRA_RESULTS_TABLE-",
+            auto_size_columns=True,
+            justification='left',
+            num_rows=15,
+            expand_x=True,
+            expand_y=True,
+            enable_events=False,
+            vertical_scroll_only=False,
+        )],
+        [sg.Text("Znaleziono: 0 | Brakujących: 0", key="-QUADRA_STATUS-")],
+        
+        # Export buttons
+        [sg.Button("Wyczyść wyniki", key="-QUADRA_CLEAR_RESULTS-"),
+         sg.Button("Eksportuj JSON", key="-QUADRA_EXPORT_JSON-"),
+         sg.Button("Eksportuj CSV", key="-QUADRA_EXPORT_CSV-")],
+    ]
+
+
 def create_layout():
     """Create main window layout with tabs."""
     tab_auth = sg.Tab("Autoryzacja", create_auth_tab())
     tab_files = sg.Tab("Pliki i podgląd", create_files_tab())
     tab_search = sg.Tab("Przeszukiwanie", create_search_tab())
     tab_single_sheet = sg.Tab("Przeszukiwanie arkusza", create_single_sheet_search_tab(), expand_x=True, expand_y=True)
+    tab_quadra = sg.Tab("Quadra", create_quadra_tab(), expand_x=True, expand_y=True)
     tab_settings = sg.Tab("Ustawienia", create_settings_tab())
 
     layout = [
-        [sg.TabGroup([[tab_auth, tab_files, tab_search, tab_single_sheet, tab_settings]], key="-TABGROUP-", expand_x=True, expand_y=True)],
+        [sg.TabGroup(
+            [[tab_auth, tab_files, tab_search, tab_single_sheet, tab_quadra, tab_settings]], 
+            key="-TABGROUP-", 
+            expand_x=True, 
+            expand_y=True
+        )],
         [sg.StatusBar("Gotowe", key="-STATUS_BAR-", size=(60, 1))],
     ]
     return layout
@@ -1134,6 +1300,197 @@ def main():
                     window["-STATUS_BAR-"].update(f"Duplikaty zapisane do: {filename}")
                 except Exception as e:
                     sg.popup_error(f"Błąd zapisu: {e}")
+
+        # -------------------- Quadra Tab Events --------------------
+        elif event == "-QUADRA_REFRESH_FILES-":
+            if drive_service is None:
+                sg.popup_error("Najpierw zaloguj się (zakładka Autoryzacja).")
+            else:
+                window["-STATUS_BAR-"].update("Ładowanie listy arkuszy...")
+                threading.Thread(target=quadra_load_files_thread, args=(window,), daemon=True).start()
+
+        elif event == EVENT_QUADRA_FILES_LOADED:
+            files = values[EVENT_QUADRA_FILES_LOADED]
+            display_list = [f"{f['name']}  ({f['id']})" for f in files]
+            window["-QUADRA_SPREADSHEET_DROPDOWN-"].update(values=display_list, value="")
+            window["-QUADRA_SHEETS_DROPDOWN-"].update(values=[], value="")
+            window["-STATUS_BAR-"].update(f"Załadowano {len(files)} arkuszy.")
+
+        elif event == "-QUADRA_SPREADSHEET_DROPDOWN-":
+            selected = values["-QUADRA_SPREADSHEET_DROPDOWN-"]
+            if selected:
+                try:
+                    combo_values = window["-QUADRA_SPREADSHEET_DROPDOWN-"].Values
+                    idx = combo_values.index(selected)
+                    file_info = quadra_current_spreadsheets[idx]
+                    window["-QUADRA_SHEETS_DROPDOWN-"].update(values=[], value="")
+                    window["-STATUS_BAR-"].update(f"Ładowanie zakładek dla: {file_info['name']}...")
+                    threading.Thread(
+                        target=quadra_load_sheets_thread,
+                        args=(window, file_info["id"], file_info["name"]),
+                        daemon=True
+                    ).start()
+                except (ValueError, IndexError, KeyError):
+                    pass
+
+        elif event == EVENT_QUADRA_SHEETS_LOADED:
+            data = values[EVENT_QUADRA_SHEETS_LOADED]
+            sheets_list = data["sheets"]
+            window["-QUADRA_SHEETS_DROPDOWN-"].update(values=sheets_list, value=sheets_list[0] if len(sheets_list) > 0 else "")
+            window["-STATUS_BAR-"].update(f"Załadowano {len(sheets_list)} zakładek z: {data['name']}")
+
+        elif event == "-QUADRA_ALL_SHEETS-":
+            all_sheets_checked = values["-QUADRA_ALL_SHEETS-"]
+            window["-QUADRA_SHEETS_DROPDOWN-"].update(disabled=all_sheets_checked)
+
+        elif event == "-QUADRA_CHECK_BTN-":
+            # Validate inputs
+            dbf_path = values["-QUADRA_DBF_PATH-"].strip()
+            if not dbf_path:
+                sg.popup_error("Wybierz plik DBF.")
+                continue
+            
+            dbf_column = values["-QUADRA_DBF_COLUMN-"].strip()
+            if not dbf_column:
+                sg.popup_error("Podaj kolumnę DBF (np. B).")
+                continue
+            
+            selected_spreadsheet = values["-QUADRA_SPREADSHEET_DROPDOWN-"]
+            if not selected_spreadsheet:
+                sg.popup_error("Wybierz arkusz kalkulacyjny z listy.")
+                continue
+            
+            # Get spreadsheet ID
+            try:
+                combo_values = window["-QUADRA_SPREADSHEET_DROPDOWN-"].Values
+                idx = combo_values.index(selected_spreadsheet)
+                file_info = quadra_current_spreadsheets[idx]
+                spreadsheet_id = file_info["id"]
+                spreadsheet_name = file_info["name"]
+            except (ValueError, IndexError):
+                sg.popup_error("Błąd: nie można znaleźć wybranego arkusza.")
+                continue
+            
+            # Get sheet names
+            all_sheets = values["-QUADRA_ALL_SHEETS-"]
+            if all_sheets:
+                sheet_names = None  # Search all sheets
+            else:
+                selected_sheet = values["-QUADRA_SHEETS_DROPDOWN-"]
+                if not selected_sheet:
+                    sg.popup_error("Wybierz zakładkę lub zaznacz 'Wszystkie zakładki'.")
+                    continue
+                sheet_names = [selected_sheet]
+            
+            # Get search mode
+            mode = 'substring' if values["-QUADRA_SUBSTRING-"] else 'exact'
+            
+            # Get column filter
+            column_filter = values["-QUADRA_COLUMN_FILTER-"].strip()
+            column_names = None
+            if column_filter:
+                # Split by comma/semicolon/newline
+                column_names = [c.strip() for c in re.split(r'[,;\n]+', column_filter) if c.strip()]
+            
+            # Disable check button, enable stop
+            window["-QUADRA_CHECK_BTN-"].update(disabled=True)
+            window["-QUADRA_STOP_BTN-"].update(disabled=False)
+            window["-STATUS_BAR-"].update(f"Sprawdzanie numerów z DBF w arkuszu {spreadsheet_name}...")
+            
+            # Start check thread
+            global quadra_check_thread
+            quadra_check_thread = threading.Thread(
+                target=quadra_check_thread_func,
+                args=(
+                    window,
+                    dbf_path,
+                    dbf_column,
+                    spreadsheet_id,
+                    mode,
+                    sheet_names,
+                    column_names
+                ),
+                daemon=True
+            )
+            quadra_check_thread.start()
+
+        elif event == "-QUADRA_STOP_BTN-":
+            quadra_stop_flag.set()
+            window["-STATUS_BAR-"].update("Zatrzymywanie sprawdzania...")
+
+        elif event == EVENT_QUADRA_CHECK_DONE:
+            window["-QUADRA_CHECK_BTN-"].update(disabled=False)
+            window["-QUADRA_STOP_BTN-"].update(disabled=True)
+            
+            results = values[EVENT_QUADRA_CHECK_DONE]
+            if results == "error":
+                window["-STATUS_BAR-"].update("Sprawdzanie zakończone z błędem.")
+            else:
+                # Display results in table
+                table_data = []
+                for result in results:
+                    table_data.append(format_quadra_result_for_table(result))
+                
+                window["-QUADRA_RESULTS_TABLE-"].update(values=table_data)
+                
+                # Update status
+                found_count = sum(1 for r in results if r['found'])
+                missing_count = sum(1 for r in results if not r['found'])
+                window["-QUADRA_STATUS-"].update(f"Znaleziono: {found_count} | Brakujących: {missing_count}")
+                window["-STATUS_BAR-"].update(f"Sprawdzanie zakończone. Znaleziono: {found_count}, brakujących: {missing_count}")
+                
+                # Store results for export
+                window.metadata = {'quadra_results': results}
+
+        elif event == "-QUADRA_CLEAR_RESULTS-":
+            window["-QUADRA_RESULTS_TABLE-"].update(values=[])
+            window["-QUADRA_STATUS-"].update("Znaleziono: 0 | Brakujących: 0")
+            window["-STATUS_BAR-"].update("Wyniki wyczyszczone.")
+            window.metadata = {'quadra_results': []}
+
+        elif event == "-QUADRA_EXPORT_JSON-":
+            results = window.metadata.get('quadra_results', []) if hasattr(window, 'metadata') else []
+            if not results:
+                sg.popup("Brak wyników do eksportu.", title="Eksport JSON")
+                continue
+            
+            filename = sg.popup_get_file(
+                "Zapisz wyniki do pliku JSON",
+                save_as=True,
+                default_extension=".json",
+                file_types=(("JSON Files", "*.json"), ("All Files", "*.*")),
+            )
+            if filename:
+                try:
+                    export_data = export_quadra_results_to_json(results)
+                    with open(filename, "w", encoding="utf-8") as f:
+                        json.dump(export_data, f, ensure_ascii=False, indent=2)
+                    sg.popup(f"Zapisano {len(results)} wyników do:\n{filename}", title="Eksport zakończony")
+                    window["-STATUS_BAR-"].update(f"Wyniki zapisane do: {filename}")
+                except Exception as e:
+                    sg.popup_error(f"Błąd zapisu JSON: {e}")
+
+        elif event == "-QUADRA_EXPORT_CSV-":
+            results = window.metadata.get('quadra_results', []) if hasattr(window, 'metadata') else []
+            if not results:
+                sg.popup("Brak wyników do eksportu.", title="Eksport CSV")
+                continue
+            
+            filename = sg.popup_get_file(
+                "Zapisz wyniki do pliku CSV",
+                save_as=True,
+                default_extension=".csv",
+                file_types=(("CSV Files", "*.csv"), ("All Files", "*.*")),
+            )
+            if filename:
+                try:
+                    csv_data = export_quadra_results_to_csv(results)
+                    with open(filename, "w", encoding="utf-8") as f:
+                        f.write(csv_data)
+                    sg.popup(f"Zapisano {len(results)} wyników do:\n{filename}", title="Eksport zakończony")
+                    window["-STATUS_BAR-"].update(f"Wyniki zapisane do: {filename}")
+                except Exception as e:
+                    sg.popup_error(f"Błąd zapisu CSV: {e}")
 
         # -------------------- Error handling --------------------
         elif event == EVENT_ERROR:
