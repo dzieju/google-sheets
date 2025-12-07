@@ -22,6 +22,10 @@ from sheets_search import (
 
 logger = logging.getLogger(__name__)
 
+# DBF field name mappings for automatic detection (case-insensitive)
+DBF_STAWKA_FIELD_NAMES = ['STAWKA', 'STAW', 'RATE', 'PRICE']
+DBF_CZESCI_FIELD_NAMES = ['CZESCI', 'PARTS']
+
 
 def column_letter_to_index(column: str) -> int:
     """
@@ -135,14 +139,9 @@ def map_dbf_record_to_result(record: Dict[str, Any], field_names: List[str]) -> 
         >>> map_dbf_record_to_result(record, field_names)
         {'stawka': '150.00', 'czesci': 'ABC'}
     """
-    # Possible field names for stawka (rate/price)
-    stawka_names = ['STAWKA', 'STAW', 'RATE', 'PRICE']
-    # Possible field names for czesci (parts)
-    czesci_names = ['CZESCI', 'PARTS']
-    
-    # Detect field names
-    stawka_field = detect_dbf_field_name(field_names, stawka_names)
-    czesci_field = detect_dbf_field_name(field_names, czesci_names)
+    # Detect field names using module-level constants
+    stawka_field = detect_dbf_field_name(field_names, DBF_STAWKA_FIELD_NAMES)
+    czesci_field = detect_dbf_field_name(field_names, DBF_CZESCI_FIELD_NAMES)
     
     # Extract values
     stawka_value = ''

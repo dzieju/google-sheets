@@ -136,9 +136,13 @@ Zakładka "Quadra" pozwala na porównanie numerów zleceń z pliku DBF z zawarto
 Aplikacja automatycznie wykrywa i wczytuje dodatkowe pola z pliku DBF:
 
 - **Stawka**: Wykrywana z pól o nazwach: `STAWKA`, `STAW`, `RATE`, `PRICE` (case-insensitive)
+  - Definiowane w stałej: `DBF_STAWKA_FIELD_NAMES` w `quadra_service.py`
 - **Części**: Wykrywana z pól o nazwach: `CZESCI`, `PARTS` (case-insensitive)
+  - Definiowane w stałej: `DBF_CZESCI_FIELD_NAMES` w `quadra_service.py`
 
 Jeśli pola nie istnieją w DBF, wyświetlane są puste wartości (bez błędu).
+
+**Uwaga dla deweloperów**: Aby dodać nowe alternatywne nazwy pól, edytuj stałe `DBF_STAWKA_FIELD_NAMES` i `DBF_CZESCI_FIELD_NAMES` w pliku `quadra_service.py`.
 
 ### Przykładowe użycie
 
