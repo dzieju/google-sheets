@@ -13,7 +13,7 @@ import tempfile
 import os
 import shutil
 import dbf
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 from quadra_service import (
     column_letter_to_index,
     parse_column_identifier,
