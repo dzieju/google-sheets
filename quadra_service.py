@@ -676,6 +676,51 @@ def format_quadra_result_for_table(result: Dict[str, Any]) -> List[str]:
     ]
 
 
+def get_quadra_table_headers(
+    column_names: Optional[Union[Dict[str, str], List[str]]] = None
+) -> List[str]:
+    """
+    Get Quadra table headers with optional custom column name mapping.
+    
+    This function applies custom column name mapping to the Quadra tab table headers,
+    ensuring consistency with CSV/JSON export behavior. The mapping supports:
+    - Trim whitespace
+    - Case-insensitive matching
+    - Unicode normalization
+    
+    Args:
+        column_names: Optional custom column names mapping:
+            - Dict[str, str]: Maps original name -> display name (e.g., {"Arkusz": "Sheet", "Stawka": "Rate"})
+            - List[str]: Display names in order (9 names for all columns)
+            - None: Use default Polish headers
+    
+    Returns:
+        List of column headers for Quadra table (9 elements)
+    
+    Examples:
+        >>> get_quadra_table_headers(None)
+        ['Arkusz', 'Płatnik', 'Numer z DBF', 'Stawka', 'Czesci', 'Status', 'Kolumna', 'Wiersz', 'Uwagi']
+        >>> get_quadra_table_headers({'Arkusz': 'Sheet', 'Stawka': 'Rate'})
+        ['Sheet', 'Płatnik', 'Numer z DBF', 'Rate', 'Czesci', 'Status', 'Kolumna', 'Wiersz', 'Uwagi']
+        >>> get_quadra_table_headers(['Sheet', 'Payer', 'Number', 'Rate', 'Parts', 'Status', 'Column', 'Row', 'Notes'])
+        ['Sheet', 'Payer', 'Number', 'Rate', 'Parts', 'Status', 'Column', 'Row', 'Notes']
+    """
+    # Default headers (Polish names used in GUI)
+    default_headers = [
+        'Arkusz',       # Sheet name
+        'Płatnik',      # Payer
+        'Numer z DBF',  # DBF Number
+        'Stawka',       # Rate
+        'Czesci',       # Parts
+        'Status',       # Status (Found/Missing)
+        'Kolumna',      # Column name
+        'Wiersz',       # Row number
+        'Uwagi'         # Notes
+    ]
+    
+    return map_column_names(default_headers, column_names)
+
+
 def map_column_names(
     original_columns: List[str],
     column_names_option: Optional[Union[Dict[str, str], List[str]]] = None
@@ -706,7 +751,23 @@ def map_column_names(
     
     if isinstance(column_names_option, dict):
         # Map using dictionary: original -> display name
-        return [column_names_option.get(col, col) for col in original_columns]
+        # Use normalization for matching to be case-insensitive and handle whitespace
+        normalized_mapping = {}
+        for key, value in column_names_option.items():
+            # Normalize the key for matching: trim and lowercase
+            normalized_key = normalize_header_name(key)
+            normalized_mapping[normalized_key] = value
+        
+        result = []
+        for col in original_columns:
+            normalized_col = normalize_header_name(col)
+            # Check if there's a mapping for this column (case-insensitive)
+            if normalized_col in normalized_mapping:
+                result.append(normalized_mapping[normalized_col])
+            else:
+                # No mapping found, use original
+                result.append(col)
+        return result
     
     elif isinstance(column_names_option, list):
         # Use list in order, fallback to original if not enough elements

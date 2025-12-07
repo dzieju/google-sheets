@@ -36,6 +36,7 @@ from quadra_service import (
     get_dbf_field_names,
     read_dbf_records_with_extra_fields,
     detect_dbf_field_name,
+    get_quadra_table_headers,
     DBF_NUMER_FIELD_NAMES,
     DBF_STAWKA_FIELD_NAMES,
     DBF_CZESCI_FIELD_NAMES,
@@ -685,10 +686,19 @@ def create_single_sheet_search_tab():
     ]
 
 
-def create_quadra_tab():
-    """Create Quadra tab layout for checking DBF order numbers against Google Sheets."""
-    # Updated table headings: Arkusz, Płatnik, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi
-    table_headings = ["Arkusz", "Płatnik", "Numer z DBF", "Stawka", "Czesci", "Status", "Kolumna", "Wiersz", "Uwagi"]
+def create_quadra_tab(column_names: Optional[Union[Dict[str, str], List[str]]] = None):
+    """
+    Create Quadra tab layout for checking DBF order numbers against Google Sheets.
+    
+    Args:
+        column_names: Optional custom column names mapping:
+            - Dict[str, str]: Maps original Polish name -> custom display name
+            - List[str]: Custom display names in order (9 names for all columns)
+            - None: Use default Polish headers (backward compatible)
+    """
+    # Get table headings with optional custom mapping
+    # Default headers: ["Arkusz", "Płatnik", "Numer z DBF", "Stawka", "Czesci", "Status", "Kolumna", "Wiersz", "Uwagi"]
+    table_headings = get_quadra_table_headers(column_names)
     
     return [
         [sg.Text("Quadra: Sprawdzanie numerów zleceń z DBF", font=("Helvetica", 12, "bold"))],
@@ -780,13 +790,18 @@ def create_quadra_tab():
     ]
 
 
-def create_layout():
-    """Create main window layout with tabs."""
+def create_layout(column_names: Optional[Union[Dict[str, str], List[str]]] = None):
+    """
+    Create main window layout with tabs.
+    
+    Args:
+        column_names: Optional custom column names for Quadra tab table headers
+    """
     tab_auth = sg.Tab("Autoryzacja", create_auth_tab())
     tab_files = sg.Tab("Pliki i podgląd", create_files_tab())
     tab_search = sg.Tab("Przeszukiwanie", create_search_tab())
     tab_single_sheet = sg.Tab("Przeszukiwanie arkusza", create_single_sheet_search_tab(), expand_x=True, expand_y=True)
-    tab_quadra = sg.Tab("Quadra", create_quadra_tab(), expand_x=True, expand_y=True)
+    tab_quadra = sg.Tab("Quadra", create_quadra_tab(column_names), expand_x=True, expand_y=True)
     tab_settings = sg.Tab("Ustawienia", create_settings_tab())
 
     layout = [
@@ -809,9 +824,13 @@ def main():
 
     sg.theme("SystemDefault")
 
+    # Load settings first to get column name mapping configuration
+    app_settings = load_settings()
+    quadra_column_names = app_settings.get('quadra_column_names', None)
+
     window = sg.Window(
         "Google Sheets Search",
-        create_layout(),
+        create_layout(quadra_column_names),
         finalize=True,
         resizable=True
     )
@@ -830,8 +849,7 @@ def main():
     dup_results_list = []
     dup_table_data = []  # Data for the duplicates table
 
-    # Load settings and restore last DBF path
-    app_settings = load_settings()
+    # Store settings in window metadata for later use
     window.metadata = {'_app_settings': app_settings}
     
     # Restore last DBF path if it exists
