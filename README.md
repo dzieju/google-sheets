@@ -131,26 +131,6 @@ Zakładka "Quadra" pozwala na porównanie numerów zleceń z pliku DBF z zawarto
    - **Eksportuj JSON**: Zapisz wyniki w formacie JSON (zawiera wszystkie pola: numer_dbf, stawka, czesci)
    - **Eksportuj CSV**: Zapisz wyniki w formacie CSV (zawiera wszystkie pola: numer_dbf, stawka, czesci)
 
-### Podgląd wybranych kolumn
-
-Zakładka "Quadra" zawiera również funkcję podglądu wybranych kolumn z arkusza Google Sheets:
-
-1. **Wybierz arkusz i zakładkę**:
-   - Wybierz arkusz kalkulacyjny z listy rozwijanej
-   - Wybierz zakładkę z listy (automatycznie załaduje listę kolumn)
-
-2. **Wybierz kolumny do podglądu**:
-   - W sekcji "Podgląd wybranych kolumn" pojawi się lista dostępnych kolumn
-   - Wybierz jedną lub więcej kolumn (użyj Ctrl/Cmd + klik aby wybrać wiele)
-   - Kolumny są wyświetlane w formacie: "Nazwa kolumny (kolumna N)"
-
-3. **Zastosuj podgląd**:
-   - Kliknij "Zastosuj podgląd" aby załadować dane
-   - W tabeli podglądu pojawią się tylko wybrane kolumny ze wszystkimi wierszami
-   - Długie wartości są automatycznie skracane do 100 znaków
-
-**Uwaga**: Funkcja podglądu działa niezależnie od funkcji sprawdzania DBF - możesz używać jej do szybkiego podglądu danych z arkusza bez potrzeby wybierania pliku DBF.
-
 ### Konfiguracja mapowania pól DBF
 
 Po wybraniu pliku DBF możesz skonfigurować mapowanie pól:
@@ -274,21 +254,11 @@ DBF_Value,Stawka,Status,SheetName,ColumnName,ColumnIndex,RowIndex,MatchedValue,C
 
 ## Changelog
 
-### v3.3 - Quadra: Podgląd wybranych kolumn
-- **NOWOŚĆ**: Funkcja podglądu wybranych kolumn w zakładce Quadra
-  - Wielokrotny wybór kolumn z listy (multi-select)
-  - Automatyczne załadowanie listy kolumn po wybraniu arkusza i zakładki
-  - Przycisk "Zastosuj podgląd" do wyświetlenia wybranych kolumn
-  - Tabela podglądu pokazuje wszystkie wiersze dla wybranych kolumn
-  - Automatyczne skracanie długich wartości (> 100 znaków)
-- **NOWOŚĆ**: Nowe funkcje pomocnicze w `sheets_search.py`:
-  - `get_sheet_headers_with_indices()` - zwraca nagłówki z indeksami kolumn (1-based)
-  - `get_sheet_data()` - pobiera wszystkie dane z arkusza jako tablicę 2D
-- **NOWOŚĆ**: Nowe testy jednostkowe w `test_column_preview.py` (6 testów, wszystkie przechodzą)
-  - Testy pobierania nagłówków z indeksami
-  - Testy pobierania danych z arkusza
-  - Testy obsługi błędów i pustych danych
-- Funkcja działa niezależnie od sprawdzania DBF - może być używana do szybkiego podglądu danych
+### v3.3 - REVERT: Cofnięcie PR #39 - Podgląd wybranych kolumn
+- **COFNIĘCIE**: Usunięto funkcję podglądu wybranych kolumn w zakładce Quadra
+- **COFNIĘCIE**: Usunięto funkcje pomocnicze z `sheets_search.py`: `get_sheet_headers_with_indices()` i `get_sheet_data()`
+- **COFNIĘCIE**: Usunięto plik `test_column_preview.py`
+- **Powód**: Funkcjonalność została cofnięta zgodnie z decyzją maintainera projektu
 
 ### v3.2 - Quadra: Konfiguracja mapowania pól DBF i zmiana kolejności kolumn
 - **NOWOŚĆ**: Panel konfiguracji mapowania pól DBF
