@@ -13,17 +13,22 @@ import tempfile
 import os
 import shutil
 import dbf
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, call
 from quadra_service import (
     column_letter_to_index,
     parse_column_identifier,
     read_dbf_column,
+    detect_dbf_field_name,
+    map_dbf_record_to_result,
+    read_dbf_records_with_extra_fields,
     normalize_value_for_comparison,
     values_match,
     search_value_in_sheet_data,
+    search_dbf_values_in_sheets,
     format_quadra_result_for_table,
     export_quadra_results_to_json,
     export_quadra_results_to_csv,
+    write_quadra_results_to_sheet,
 )
 
 
@@ -194,17 +199,22 @@ class TestResultFormatting(unittest.TestCase):
             'sheetName': 'Sheet1',
             'columnName': 'Order',
             'rowIndex': 5,
-            'notes': 'Found in Sheet1 at B6'
+            'notes': 'Found in Sheet1 at B6',
+            'stawka': '',
+            'czesci': ''
         }
         
         table_row = format_quadra_result_for_table(result)
         
+        # New format: [Numer z DBF, Stawka, Status, Arkusz, Kolumna, Wiersz, Czesci_extra, Uwagi]
         self.assertEqual(table_row[0], '12345')  # DBF value
-        self.assertEqual(table_row[1], 'Found')  # Status
-        self.assertEqual(table_row[2], 'Sheet1')  # Sheet name
-        self.assertEqual(table_row[3], 'Order')  # Column name
-        self.assertEqual(table_row[4], '6')  # Row (1-based)
-        self.assertEqual(table_row[5], 'Found in Sheet1 at B6')  # Notes
+        self.assertEqual(table_row[1], '')  # Stawka
+        self.assertEqual(table_row[2], 'Found')  # Status
+        self.assertEqual(table_row[3], 'Sheet1')  # Sheet name
+        self.assertEqual(table_row[4], 'Order')  # Column name
+        self.assertEqual(table_row[5], '6')  # Row (1-based)
+        self.assertEqual(table_row[6], '')  # Czesci_extra
+        self.assertEqual(table_row[7], 'Found in Sheet1 at B6')  # Notes
     
     def test_format_quadra_result_for_table_missing(self):
         """Test formatting a missing result for table display."""
@@ -214,17 +224,22 @@ class TestResultFormatting(unittest.TestCase):
             'sheetName': None,
             'columnName': None,
             'rowIndex': None,
-            'notes': 'Missing'
+            'notes': 'Missing',
+            'stawka': '',
+            'czesci': ''
         }
         
         table_row = format_quadra_result_for_table(result)
         
+        # New format: [Numer z DBF, Stawka, Status, Arkusz, Kolumna, Wiersz, Czesci_extra, Uwagi]
         self.assertEqual(table_row[0], '99999')  # DBF value
-        self.assertEqual(table_row[1], 'Missing')  # Status
-        self.assertEqual(table_row[2], '')  # Sheet name
-        self.assertEqual(table_row[3], '')  # Column name
-        self.assertEqual(table_row[4], '')  # Row
-        self.assertEqual(table_row[5], 'Missing')  # Notes
+        self.assertEqual(table_row[1], '')  # Stawka
+        self.assertEqual(table_row[2], 'Missing')  # Status
+        self.assertEqual(table_row[3], '')  # Sheet name
+        self.assertEqual(table_row[4], '')  # Column name
+        self.assertEqual(table_row[5], '')  # Row
+        self.assertEqual(table_row[6], '')  # Czesci_extra
+        self.assertEqual(table_row[7], 'Missing')  # Notes
     
     def test_export_quadra_results_to_json(self):
         """Test JSON export formatting."""
@@ -237,7 +252,9 @@ class TestResultFormatting(unittest.TestCase):
                 'columnIndex': 1,
                 'rowIndex': 5,
                 'matchedValue': '12345',
-                'notes': 'Found'
+                'notes': 'Found',
+                'stawka': '',
+                'czesci': ''
             },
             {
                 'dbfValue': '99999',
@@ -247,7 +264,9 @@ class TestResultFormatting(unittest.TestCase):
                 'columnIndex': None,
                 'rowIndex': None,
                 'matchedValue': None,
-                'notes': 'Missing'
+                'notes': 'Missing',
+                'stawka': '',
+                'czesci': ''
             }
         ]
         
@@ -256,6 +275,9 @@ class TestResultFormatting(unittest.TestCase):
         self.assertEqual(len(json_results), 2)
         self.assertEqual(json_results[0]['status'], 'Found')
         self.assertEqual(json_results[1]['status'], 'Missing')
+        # Check that stawka and czesci are included
+        self.assertIn('stawka', json_results[0])
+        self.assertIn('czesci', json_results[0])
     
     def test_export_quadra_results_to_csv(self):
         """Test CSV export formatting."""
@@ -268,7 +290,9 @@ class TestResultFormatting(unittest.TestCase):
                 'columnIndex': 1,
                 'rowIndex': 5,
                 'matchedValue': '12345',
-                'notes': 'Found'
+                'notes': 'Found',
+                'stawka': '',
+                'czesci': ''
             }
         ]
         
@@ -331,6 +355,479 @@ class TestDBFReading(unittest.TestCase):
         """Test reading from invalid column."""
         with self.assertRaises(ValueError):
             read_dbf_column(self.dbf_path, 'ZZ')
+
+
+class TestDBFFieldDetection(unittest.TestCase):
+    """Tests for DBF field name detection functions."""
+    
+    def test_detect_dbf_field_name_exact_match(self):
+        """Test detecting exact field name match."""
+        field_names = ['NUMER', 'STAWKA', 'DATA']
+        possible_names = ['STAWKA', 'STAW', 'RATE']
+        
+        result = detect_dbf_field_name(field_names, possible_names)
+        self.assertEqual(result, 'STAWKA')
+    
+    def test_detect_dbf_field_name_alternative(self):
+        """Test detecting alternative field name."""
+        field_names = ['NUMER', 'RATE', 'DATA']
+        possible_names = ['STAWKA', 'STAW', 'RATE']
+        
+        result = detect_dbf_field_name(field_names, possible_names)
+        self.assertEqual(result, 'RATE')
+    
+    def test_detect_dbf_field_name_case_insensitive(self):
+        """Test case-insensitive field name detection."""
+        field_names = ['numer', 'stawka', 'data']
+        possible_names = ['STAWKA', 'STAW', 'RATE']
+        
+        result = detect_dbf_field_name(field_names, possible_names)
+        self.assertEqual(result, 'stawka')
+    
+    def test_detect_dbf_field_name_not_found(self):
+        """Test when field name is not found."""
+        field_names = ['NUMER', 'DATA', 'UWAGI']
+        possible_names = ['STAWKA', 'STAW', 'RATE']
+        
+        result = detect_dbf_field_name(field_names, possible_names)
+        self.assertIsNone(result)
+    
+    def test_detect_dbf_field_name_empty_lists(self):
+        """Test with empty input lists."""
+        self.assertIsNone(detect_dbf_field_name([], ['STAWKA']))
+        self.assertIsNone(detect_dbf_field_name(['NUMER'], []))
+        self.assertIsNone(detect_dbf_field_name([], []))
+
+
+class TestMapDBFRecord(unittest.TestCase):
+    """Tests for mapping DBF records to results."""
+    
+    def test_map_dbf_record_with_all_fields(self):
+        """Test mapping record with both stawka and czesci fields."""
+        record = {
+            'NUMER': '12345',
+            'STAWKA': '150.00',
+            'CZESCI': 'ABC',
+            'DATA': '2025-01-01'
+        }
+        field_names = ['NUMER', 'STAWKA', 'CZESCI', 'DATA']
+        
+        result = map_dbf_record_to_result(record, field_names)
+        
+        self.assertEqual(result['stawka'], '150.00')
+        self.assertEqual(result['czesci'], 'ABC')
+    
+    def test_map_dbf_record_with_alternative_names(self):
+        """Test mapping record with alternative field names."""
+        record = {
+            'NUMER': '12345',
+            'RATE': '150.00',
+            'PARTS': 'ABC'
+        }
+        field_names = ['NUMER', 'RATE', 'PARTS']
+        
+        result = map_dbf_record_to_result(record, field_names)
+        
+        self.assertEqual(result['stawka'], '150.00')
+        self.assertEqual(result['czesci'], 'ABC')
+    
+    def test_map_dbf_record_missing_fields(self):
+        """Test mapping record with missing fields."""
+        record = {
+            'NUMER': '12345',
+            'DATA': '2025-01-01'
+        }
+        field_names = ['NUMER', 'DATA']
+        
+        result = map_dbf_record_to_result(record, field_names)
+        
+        self.assertEqual(result['stawka'], '')
+        self.assertEqual(result['czesci'], '')
+    
+    def test_map_dbf_record_with_none_values(self):
+        """Test mapping record with None values."""
+        record = {
+            'NUMER': '12345',
+            'STAWKA': None,
+            'CZESCI': None
+        }
+        field_names = ['NUMER', 'STAWKA', 'CZESCI']
+        
+        result = map_dbf_record_to_result(record, field_names)
+        
+        self.assertEqual(result['stawka'], '')
+        self.assertEqual(result['czesci'], '')
+
+
+class TestReadDBFRecordsWithExtraFields(unittest.TestCase):
+    """Tests for reading DBF records with extra fields."""
+    
+    def setUp(self):
+        """Set up test DBF file with extra fields."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.dbf_path = os.path.join(self.temp_dir, 'test_extra.dbf')
+        
+        # Create DBF with ID, ORDER, STAWKA, CZESCI columns
+        table = dbf.Table(self.dbf_path, 'ID N(5,0); ORDER C(20); STAWKA C(10); CZESCI C(10)')
+        table.open(mode=dbf.READ_WRITE)
+        table.append((1, '12345', '150.00', 'ABC'))
+        table.append((2, '67890', '200.50', 'XYZ'))
+        table.append((3, 'ABC-001', '100.00', 'DEF'))
+        table.close()
+    
+    def tearDown(self):
+        """Clean up test files."""
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def test_read_records_with_extra_fields(self):
+        """Test reading DBF records with stawka and czesci fields."""
+        records = read_dbf_records_with_extra_fields(self.dbf_path, 'B')
+        
+        self.assertEqual(len(records), 3)
+        
+        # Check first record
+        self.assertEqual(records[0]['value'], '12345')
+        self.assertEqual(records[0]['stawka'], '150.00')
+        self.assertEqual(records[0]['czesci'], 'ABC')
+        
+        # Check second record
+        self.assertEqual(records[1]['value'], '67890')
+        self.assertEqual(records[1]['stawka'], '200.50')
+        self.assertEqual(records[1]['czesci'], 'XYZ')
+    
+    def test_read_records_missing_extra_fields(self):
+        """Test reading DBF records when extra fields are missing."""
+        # Create DBF without STAWKA and CZESCI
+        dbf_path2 = os.path.join(self.temp_dir, 'test_no_extra.dbf')
+        table = dbf.Table(dbf_path2, 'ID N(5,0); ORDER C(20)')
+        table.open(mode=dbf.READ_WRITE)
+        table.append((1, '12345'))
+        table.close()
+        
+        records = read_dbf_records_with_extra_fields(dbf_path2, 'B')
+        
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]['value'], '12345')
+        self.assertEqual(records[0]['stawka'], '')
+        self.assertEqual(records[0]['czesci'], '')
+
+
+class TestSearchDBFValuesWithExtraFields(unittest.TestCase):
+    """Tests for searching DBF values with extra fields."""
+    
+    def test_search_with_simple_values(self):
+        """Test search with simple values (backward compatibility)."""
+        # Mock services
+        mock_drive = MagicMock()
+        mock_sheets = MagicMock()
+        
+        # Mock spreadsheet metadata
+        mock_sheets.spreadsheets().get().execute.return_value = {
+            'sheets': [{'properties': {'title': 'Sheet1'}}]
+        }
+        
+        # Mock sheet data
+        mock_sheets.spreadsheets().values().get().execute.return_value = {
+            'values': [
+                ['ID', 'Order', 'Description'],
+                [1, '12345', 'Test 1'],
+                [2, '67890', 'Test 2'],
+            ]
+        }
+        
+        # Search with simple values
+        results = search_dbf_values_in_sheets(
+            drive_service=mock_drive,
+            sheets_service=mock_sheets,
+            dbf_values=['12345', '99999'],
+            spreadsheet_id='test_id',
+            mode='exact'
+        )
+        
+        self.assertEqual(len(results), 2)
+        
+        # First value found
+        self.assertTrue(results[0]['found'])
+        self.assertEqual(results[0]['dbfValue'], '12345')
+        self.assertEqual(results[0]['stawka'], '')
+        self.assertEqual(results[0]['czesci'], '')
+        
+        # Second value not found
+        self.assertFalse(results[1]['found'])
+        self.assertEqual(results[1]['dbfValue'], '99999')
+        self.assertEqual(results[1]['stawka'], '')
+        self.assertEqual(results[1]['czesci'], '')
+    
+    def test_search_with_record_dicts(self):
+        """Test search with record dictionaries containing extra fields."""
+        # Mock services
+        mock_drive = MagicMock()
+        mock_sheets = MagicMock()
+        
+        # Mock spreadsheet metadata
+        mock_sheets.spreadsheets().get().execute.return_value = {
+            'sheets': [{'properties': {'title': 'Sheet1'}}]
+        }
+        
+        # Mock sheet data
+        mock_sheets.spreadsheets().values().get().execute.return_value = {
+            'values': [
+                ['ID', 'Order', 'Description'],
+                [1, '12345', 'Test 1'],
+            ]
+        }
+        
+        # Search with record dicts
+        dbf_records = [
+            {'value': '12345', 'stawka': '150.00', 'czesci': 'ABC'},
+            {'value': '99999', 'stawka': '200.50', 'czesci': 'XYZ'}
+        ]
+        
+        results = search_dbf_values_in_sheets(
+            drive_service=mock_drive,
+            sheets_service=mock_sheets,
+            dbf_values=dbf_records,
+            spreadsheet_id='test_id',
+            mode='exact'
+        )
+        
+        self.assertEqual(len(results), 2)
+        
+        # First record found with extra fields
+        self.assertTrue(results[0]['found'])
+        self.assertEqual(results[0]['dbfValue'], '12345')
+        self.assertEqual(results[0]['stawka'], '150.00')
+        self.assertEqual(results[0]['czesci'], 'ABC')
+        
+        # Second record not found with extra fields preserved
+        self.assertFalse(results[1]['found'])
+        self.assertEqual(results[1]['dbfValue'], '99999')
+        self.assertEqual(results[1]['stawka'], '200.50')
+        self.assertEqual(results[1]['czesci'], 'XYZ')
+
+
+class TestFormatQuadraResultWithExtraFields(unittest.TestCase):
+    """Tests for formatting Quadra results with extra fields."""
+    
+    def test_format_result_for_table(self):
+        """Test formatting result for GUI table with extra fields."""
+        result = {
+            'dbfValue': '12345',
+            'found': True,
+            'sheetName': 'Sheet1',
+            'columnName': 'Order',
+            'rowIndex': 5,
+            'notes': 'Found in Sheet1 at B6',
+            'stawka': '150.00',
+            'czesci': 'ABC'
+        }
+        
+        row = format_quadra_result_for_table(result)
+        
+        # Expected format: [Numer z DBF, Stawka, Status, Arkusz, Kolumna, Wiersz, Czesci_extra, Uwagi]
+        self.assertEqual(len(row), 8)
+        self.assertEqual(row[0], '12345')  # Numer z DBF
+        self.assertEqual(row[1], '150.00')  # Stawka
+        self.assertEqual(row[2], 'Found')  # Status
+        self.assertEqual(row[3], 'Sheet1')  # Arkusz
+        self.assertEqual(row[4], 'Order')  # Kolumna
+        self.assertEqual(row[5], '6')  # Wiersz
+        self.assertEqual(row[6], 'ABC')  # Czesci_extra
+        self.assertEqual(row[7], 'Found in Sheet1 at B6')  # Uwagi
+    
+    def test_format_result_missing(self):
+        """Test formatting missing result with extra fields."""
+        result = {
+            'dbfValue': '99999',
+            'found': False,
+            'sheetName': None,
+            'columnName': None,
+            'rowIndex': None,
+            'notes': 'Missing',
+            'stawka': '200.50',
+            'czesci': 'XYZ'
+        }
+        
+        row = format_quadra_result_for_table(result)
+        
+        self.assertEqual(len(row), 8)
+        self.assertEqual(row[0], '99999')
+        self.assertEqual(row[1], '200.50')
+        self.assertEqual(row[2], 'Missing')
+        self.assertEqual(row[3], '')
+        self.assertEqual(row[4], '')
+        self.assertEqual(row[5], '')
+        self.assertEqual(row[6], 'XYZ')
+        self.assertEqual(row[7], 'Missing')
+
+
+class TestExportQuadraResultsWithExtraFields(unittest.TestCase):
+    """Tests for exporting Quadra results with extra fields."""
+    
+    def test_export_to_json(self):
+        """Test JSON export with extra fields."""
+        results = [
+            {
+                'dbfValue': '12345',
+                'found': True,
+                'sheetName': 'Sheet1',
+                'columnName': 'Order',
+                'columnIndex': 1,
+                'rowIndex': 5,
+                'matchedValue': '12345',
+                'notes': 'Found',
+                'stawka': '150.00',
+                'czesci': 'ABC'
+            }
+        ]
+        
+        export_data = export_quadra_results_to_json(results)
+        
+        self.assertEqual(len(export_data), 1)
+        self.assertEqual(export_data[0]['dbfValue'], '12345')
+        self.assertEqual(export_data[0]['stawka'], '150.00')
+        self.assertEqual(export_data[0]['czesci'], 'ABC')
+        self.assertEqual(export_data[0]['status'], 'Found')
+    
+    def test_export_to_csv(self):
+        """Test CSV export with extra fields."""
+        results = [
+            {
+                'dbfValue': '12345',
+                'found': True,
+                'sheetName': 'Sheet1',
+                'columnName': 'Order',
+                'columnIndex': 1,
+                'rowIndex': 5,
+                'matchedValue': '12345',
+                'notes': 'Found',
+                'stawka': '150.00',
+                'czesci': 'ABC'
+            }
+        ]
+        
+        csv_data = export_quadra_results_to_csv(results)
+        
+        lines = csv_data.strip().split('\n')
+        self.assertEqual(len(lines), 2)  # Header + 1 data row
+        
+        # Check header
+        header = lines[0]
+        self.assertIn('Stawka', header)
+        self.assertIn('Czesci', header)
+        
+        # Check data row
+        data_row = lines[1]
+        self.assertIn('12345', data_row)
+        self.assertIn('150.00', data_row)
+        self.assertIn('ABC', data_row)
+
+
+class TestWriteQuadraResultsToSheet(unittest.TestCase):
+    """Tests for writing Quadra results to Google Sheets."""
+    
+    def test_write_results_to_sheet(self):
+        """Test writing results to columns I and J."""
+        # Mock services
+        mock_sheets = MagicMock()
+        
+        # Mock spreadsheet metadata
+        mock_sheets.spreadsheets().get().execute.return_value = {
+            'sheets': [{'properties': {'sheetId': 123, 'title': 'Sheet1'}}]
+        }
+        
+        # Mock update response
+        mock_update_result = MagicMock()
+        mock_update_result.execute.return_value = {
+            'updatedCells': 6  # Header + 2 data rows = 3 rows * 2 columns
+        }
+        mock_sheets.spreadsheets().values().update.return_value = mock_update_result
+        
+        results = [
+            {'dbfValue': '12345', 'stawka': '150.00', 'czesci': 'ABC', 'found': True},
+            {'dbfValue': '67890', 'stawka': '200.50', 'czesci': 'XYZ', 'found': False}
+        ]
+        
+        write_quadra_results_to_sheet(
+            sheets_service=mock_sheets,
+            spreadsheet_id='test_id',
+            sheet_name='Sheet1',
+            results=results,
+            start_row=1
+        )
+        
+        # Verify update was called with correct parameters
+        mock_sheets.spreadsheets().values().update.assert_called_with(
+            spreadsheetId='test_id',
+            range='Sheet1!I1:J3',
+            valueInputOption='RAW',
+            body={
+                'values': [
+                    ['Stawka', 'Czesci_extra'],
+                    ['150.00', 'ABC'],
+                    ['200.50', 'XYZ']
+                ]
+            }
+        )
+    
+    def test_write_results_empty_fields(self):
+        """Test writing results with empty extra fields."""
+        mock_sheets = MagicMock()
+        
+        mock_sheets.spreadsheets().get().execute.return_value = {
+            'sheets': [{'properties': {'sheetId': 123, 'title': 'Sheet1'}}]
+        }
+        
+        mock_update_result = MagicMock()
+        mock_update_result.execute.return_value = {
+            'updatedCells': 4
+        }
+        mock_sheets.spreadsheets().values().update.return_value = mock_update_result
+        
+        results = [
+            {'dbfValue': '12345', 'stawka': '', 'czesci': '', 'found': True}
+        ]
+        
+        write_quadra_results_to_sheet(
+            sheets_service=mock_sheets,
+            spreadsheet_id='test_id',
+            sheet_name='Sheet1',
+            results=results,
+            start_row=1
+        )
+        
+        # Verify update was called with correct empty values
+        mock_sheets.spreadsheets().values().update.assert_called_with(
+            spreadsheetId='test_id',
+            range='Sheet1!I1:J2',
+            valueInputOption='RAW',
+            body={
+                'values': [
+                    ['Stawka', 'Czesci_extra'],
+                    ['', '']
+                ]
+            }
+        )
+    
+    def test_write_results_sheet_not_found(self):
+        """Test error handling when sheet is not found."""
+        mock_sheets = MagicMock()
+        
+        mock_sheets.spreadsheets().get().execute.return_value = {
+            'sheets': [{'properties': {'sheetId': 123, 'title': 'OtherSheet'}}]
+        }
+        
+        results = [{'dbfValue': '12345', 'stawka': '150.00', 'czesci': 'ABC'}]
+        
+        with self.assertRaises(ValueError) as cm:
+            write_quadra_results_to_sheet(
+                sheets_service=mock_sheets,
+                spreadsheet_id='test_id',
+                sheet_name='Sheet1',
+                results=results
+            )
+        
+        self.assertIn("Sheet 'Sheet1' not found", str(cm.exception))
 
 
 if __name__ == '__main__':
