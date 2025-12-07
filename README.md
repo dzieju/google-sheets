@@ -89,13 +89,14 @@ Funkcja wykrywania duplikatów również obsługuje wiele kolumn:
 
 ## Funkcja Quadra - Sprawdzanie numerów zleceń z DBF
 
-Zakładka "Quadra" pozwala na porównanie numerów zleceń z pliku DBF z zawartością arkuszy Google Sheets.
+Zakładka "Quadra" pozwala na porównanie numerów zleceń z pliku DBF z zawartością arkuszy Google Sheets oraz wyświetlanie dodatkowych informacji z DBF (stawka, części).
 
 ### Jak używać Quadra
 
 1. **Wybierz plik DBF**:
    - Kliknij "Wybierz plik DBF" aby wskazać plik z numerami zleceń
    - Domyślnie aplikacja wczytuje kolumnę B (można zmienić w polu "Kolumna DBF")
+   - Aplikacja automatycznie wykrywa i wczytuje dodatkowe pola: stawka i części
 
 2. **Podaj kolumnę DBF**:
    - Wpisz literę kolumny (np. "B", "C") lub numer (np. "1", "2")
@@ -117,21 +118,35 @@ Zakładka "Quadra" pozwala na porównanie numerów zleceń z pliku DBF z zawarto
 6. **Sprawdź**:
    - Kliknij "Sprawdź" aby rozpocząć porównanie
    - Wyniki pojawią się w tabeli z następującymi kolumnami:
-     - **Numer z DBF**: Wartość z pliku DBF
+     - **Numer z DBF**: Wartość z pliku DBF (główna kolumna wyszukiwania)
+     - **Stawka**: Wartość stawki z DBF (automatycznie wykrywana z pól: STAWKA, STAW, RATE, PRICE)
      - **Status**: "Found" (znaleziono) lub "Missing" (brakuje)
      - **Arkusz**: Nazwa zakładki gdzie znaleziono wartość
      - **Kolumna**: Nazwa kolumny gdzie znaleziono wartość
      - **Wiersz**: Numer wiersza gdzie znaleziono wartość
+     - **Czesci_extra**: Wartość części z DBF (automatycznie wykrywana z pól: CZESCI, PARTS)
      - **Uwagi**: Dodatkowe informacje
 
 7. **Eksport wyników**:
-   - **Eksportuj JSON**: Zapisz wyniki w formacie JSON
-   - **Eksportuj CSV**: Zapisz wyniki w formacie CSV
+   - **Eksportuj JSON**: Zapisz wyniki w formacie JSON (zawiera wszystkie pola w tym stawka i czesci)
+   - **Eksportuj CSV**: Zapisz wyniki w formacie CSV (zawiera wszystkie pola w tym stawka i czesci)
+
+### Wykrywanie dodatkowych pól z DBF
+
+Aplikacja automatycznie wykrywa i wczytuje dodatkowe pola z pliku DBF:
+
+- **Stawka**: Wykrywana z pól o nazwach: `STAWKA`, `STAW`, `RATE`, `PRICE` (case-insensitive)
+- **Części**: Wykrywana z pól o nazwach: `CZESCI`, `PARTS` (case-insensitive)
+
+Jeśli pola nie istnieją w DBF, wyświetlane są puste wartości (bez błędu).
 
 ### Przykładowe użycie
 
 ```
-1. Masz plik DBF z numerami zleceń w kolumnie B: 12345, 67890, ABC-001
+1. Masz plik DBF z kolumnami:
+   - ORDER (kolumna B): 12345, 67890, ABC-001
+   - STAWKA: 150.00, 200.50, 100.00
+   - CZESCI: ABC, XYZ, DEF
 2. Chcesz sprawdzić czy te numery są w arkuszu Google "Zlecenia 2025"
 3. W zakładce Quadra:
    - Wybierz plik DBF
@@ -139,7 +154,11 @@ Zakładka "Quadra" pozwala na porównanie numerów zleceń z pliku DBF z zawarto
    - Wybierz arkusz "Zlecenia 2025"
    - Zaznacz "Wszystkie zakładki"
    - Kliknij "Sprawdź"
-4. Wyniki pokażą które numery zostały znalezione i gdzie, a które brakują
+4. Wyniki pokażą:
+   - Które numery zostały znalezione i gdzie
+   - Stawkę z DBF dla każdego numeru
+   - Części z DBF dla każdego numeru
+   - Które numery brakują
 ```
 
 ### Dopasowanie wartości
@@ -153,6 +172,15 @@ Zakładka "Quadra" pozwala na porównanie numerów zleceń z pliku DBF z zawarto
   - Sprawdza czy jedna wartość zawiera drugą
   - Przydatne gdy numery w arkuszu mają dodatkowe przedrostki/przyrostki
 
+### Zapisywanie wyników do Google Sheets
+
+Możesz zapisać wyniki sprawdzenia do arkusza Google Sheets używając funkcji `write_quadra_results_to_sheet`:
+
+- Dane zapisywane są do kolumn I (Stawka) i J (Czesci_extra)
+- Kolumny I i J są automatycznie tworzone/aktualizowane
+- Pierwszy wiersz zawiera nagłówki: "Stawka" i "Czesci_extra"
+- Zachowana jest kompatybilność z istniejącymi danymi w innych kolumnach
+
 ### Struktura eksportowanych danych
 
 **JSON**:
@@ -160,22 +188,26 @@ Zakładka "Quadra" pozwala na porównanie numerów zleceń z pliku DBF z zawarto
 [
   {
     "dbfValue": "12345",
+    "stawka": "150.00",
     "status": "Found",
     "sheetName": "2025",
     "columnName": "Numer zlecenia",
     "columnIndex": 1,
     "rowIndex": 5,
     "matchedValue": "12345",
+    "czesci": "ABC",
     "notes": "Found in 2025 at B6"
   },
   {
     "dbfValue": "99999",
+    "stawka": "200.50",
     "status": "Missing",
     "sheetName": "",
     "columnName": "",
     "columnIndex": null,
     "rowIndex": null,
     "matchedValue": "",
+    "czesci": "XYZ",
     "notes": "Missing"
   }
 ]
@@ -183,9 +215,9 @@ Zakładka "Quadra" pozwala na porównanie numerów zleceń z pliku DBF z zawarto
 
 **CSV**:
 ```
-DBF_Value,Status,SheetName,ColumnName,ColumnIndex,RowIndex,MatchedValue,Notes
-12345,Found,2025,Numer zlecenia,1,5,12345,Found in 2025 at B6
-99999,Missing,,,,,Missing
+DBF_Value,Stawka,Status,SheetName,ColumnName,ColumnIndex,RowIndex,MatchedValue,Czesci,Notes
+12345,150.00,Found,2025,Numer zlecenia,1,5,12345,ABC,Found in 2025 at B6
+99999,200.50,Missing,,,,,XYZ,Missing
 ```
 
 ## Pliki
@@ -200,6 +232,32 @@ DBF_Value,Status,SheetName,ColumnName,ColumnIndex,RowIndex,MatchedValue,Notes
 - Nie commituj `credentials.json` ani `token.json` do repo (dodane do .gitignore).
 
 ## Changelog
+
+### v3.1 - Quadra: Dodatkowe kolumny Stawka i Czesci z DBF
+- **NOWOŚĆ**: Automatyczne wykrywanie i wyświetlanie kolumny "Stawka" z DBF
+  - Wykrywanie z alternatywnych nazw pól: STAWKA, STAW, RATE, PRICE (case-insensitive)
+  - Kolumna "Stawka" pojawia się w GUI zaraz po "Numer z DBF"
+  - Wartości zapisywane do kolumny I (index 8) w Google Sheets
+- **NOWOŚĆ**: Automatyczne wykrywanie i wyświetlanie kolumny "Czesci_extra" z DBF
+  - Wykrywanie z alternatywnych nazw pól: CZESCI, PARTS (case-insensitive)
+  - Kolumna "Czesci_extra" pojawia się w GUI obok kolumny "Czesci"
+  - Wartości zapisywane do kolumny J (index 9) w Google Sheets
+- **NOWOŚĆ**: Funkcja `write_quadra_results_to_sheet()` do zapisu wyników do Google Sheets
+  - Automatyczne tworzenie/aktualizacja kolumn I i J
+  - Nagłówki "Stawka" i "Czesci_extra" w pierwszym wierszu
+  - Zachowana kompatybilność z istniejącymi danymi
+- **NOWOŚĆ**: Nowe funkcje pomocnicze w `quadra_service.py`:
+  - `detect_dbf_field_name()` - wykrywanie nazw pól z alternatyw
+  - `map_dbf_record_to_result()` - mapowanie rekordów DBF na wyniki
+  - `read_dbf_records_with_extra_fields()` - odczyt DBF z dodatkowymi polami
+- **NOWOŚĆ**: Eksport JSON i CSV zawiera teraz pola "stawka" i "czesci"
+- **NOWOŚĆ**: Rozbudowane testy jednostkowe (43 testy, wszystkie przechodzą)
+  - Testy wykrywania pól z alternatywnych nazw
+  - Testy obsługi brakujących pól
+  - Testy formatowania i eksportu z nowymi kolumnami
+  - Testy zapisu do Google Sheets (z mockami)
+- Bezpieczna obsługa brakujących pól - puste stringi zamiast błędów
+- Pełna kompatybilność wsteczna - obsługa zarówno prostych wartości jak i słowników z rekordami
 
 ### v3.0 - Quadra: Sprawdzanie numerów zleceń z DBF
 - **NOWOŚĆ**: Dodano zakładkę "Quadra" do sprawdzania numerów zleceń z plików DBF
