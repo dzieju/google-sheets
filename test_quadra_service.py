@@ -201,20 +201,22 @@ class TestResultFormatting(unittest.TestCase):
             'rowIndex': 5,
             'notes': 'Found in Sheet1 at B6',
             'stawka': '',
-            'czesci': ''
+            'czesci': '',
+            'platnik': ''
         }
         
         table_row = format_quadra_result_for_table(result)
         
-        # New format: [Arkusz, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi]
+        # New format: [Arkusz, Płatnik, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi]
         self.assertEqual(table_row[0], 'Sheet1')  # Arkusz (Sheet name)
-        self.assertEqual(table_row[1], '12345')  # Numer z DBF (DBF value)
-        self.assertEqual(table_row[2], '')  # Stawka
-        self.assertEqual(table_row[3], '')  # Czesci
-        self.assertEqual(table_row[4], 'Found')  # Status
-        self.assertEqual(table_row[5], 'Order')  # Kolumna (Column name)
-        self.assertEqual(table_row[6], '6')  # Wiersz (Row, 1-based)
-        self.assertEqual(table_row[7], 'Found in Sheet1 at B6')  # Uwagi (Notes)
+        self.assertEqual(table_row[1], '')  # Płatnik
+        self.assertEqual(table_row[2], '12345')  # Numer z DBF (DBF value)
+        self.assertEqual(table_row[3], '')  # Stawka
+        self.assertEqual(table_row[4], '')  # Czesci
+        self.assertEqual(table_row[5], 'Found')  # Status
+        self.assertEqual(table_row[6], 'Order')  # Kolumna (Column name)
+        self.assertEqual(table_row[7], '6')  # Wiersz (Row, 1-based)
+        self.assertEqual(table_row[8], 'Found in Sheet1 at B6')  # Uwagi (Notes)
     
     def test_format_quadra_result_for_table_missing(self):
         """Test formatting a missing result for table display."""
@@ -226,20 +228,22 @@ class TestResultFormatting(unittest.TestCase):
             'rowIndex': None,
             'notes': 'Missing',
             'stawka': '',
-            'czesci': ''
+            'czesci': '',
+            'platnik': ''
         }
         
         table_row = format_quadra_result_for_table(result)
         
-        # New format: [Arkusz, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi]
+        # New format: [Arkusz, Płatnik, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi]
         self.assertEqual(table_row[0], '')  # Arkusz (Sheet name)
-        self.assertEqual(table_row[1], '99999')  # Numer z DBF (DBF value)
-        self.assertEqual(table_row[2], '')  # Stawka
-        self.assertEqual(table_row[3], '')  # Czesci
-        self.assertEqual(table_row[4], 'Missing')  # Status
-        self.assertEqual(table_row[5], '')  # Kolumna (Column name)
-        self.assertEqual(table_row[6], '')  # Wiersz (Row)
-        self.assertEqual(table_row[7], 'Missing')  # Uwagi (Notes)
+        self.assertEqual(table_row[1], '')  # Płatnik
+        self.assertEqual(table_row[2], '99999')  # Numer z DBF (DBF value)
+        self.assertEqual(table_row[3], '')  # Stawka
+        self.assertEqual(table_row[4], '')  # Czesci
+        self.assertEqual(table_row[5], 'Missing')  # Status
+        self.assertEqual(table_row[6], '')  # Kolumna (Column name)
+        self.assertEqual(table_row[7], '')  # Wiersz (Row)
+        self.assertEqual(table_row[8], 'Missing')  # Uwagi (Notes)
     
     def test_export_quadra_results_to_json(self):
         """Test JSON export formatting."""
@@ -417,6 +421,7 @@ class TestMapDBFRecord(unittest.TestCase):
         self.assertEqual(result['numer_dbf'], '12345')
         self.assertEqual(result['stawka'], '150.00')
         self.assertEqual(result['czesci'], 'ABC')
+        self.assertEqual(result['platnik'], '')  # Platnik not mapped, should be empty
     
     def test_map_dbf_record_with_alternative_names(self):
         """Test mapping record with alternative field names."""
@@ -432,6 +437,7 @@ class TestMapDBFRecord(unittest.TestCase):
         self.assertEqual(result['numer_dbf'], '12345')
         self.assertEqual(result['stawka'], '150.00')
         self.assertEqual(result['czesci'], 'ABC')
+        self.assertEqual(result['platnik'], '')  # Platnik not mapped, should be empty
     
     def test_map_dbf_record_missing_fields(self):
         """Test mapping record with missing fields."""
@@ -446,6 +452,7 @@ class TestMapDBFRecord(unittest.TestCase):
         self.assertEqual(result['numer_dbf'], '12345')
         self.assertEqual(result['stawka'], '')
         self.assertEqual(result['czesci'], '')
+        self.assertEqual(result['platnik'], '')  # Platnik not present
     
     def test_map_dbf_record_with_none_values(self):
         """Test mapping record with None values."""
@@ -461,6 +468,7 @@ class TestMapDBFRecord(unittest.TestCase):
         self.assertEqual(result['numer_dbf'], '12345')
         self.assertEqual(result['stawka'], '')
         self.assertEqual(result['czesci'], '')
+        self.assertEqual(result['platnik'], '')  # Platnik not present
     
     def test_map_dbf_record_with_user_mapping(self):
         """Test mapping record with user-provided mapping."""
@@ -484,6 +492,7 @@ class TestMapDBFRecord(unittest.TestCase):
         self.assertEqual(result['numer_dbf'], '12345')
         self.assertEqual(result['stawka'], '150.00')
         self.assertEqual(result['czesci'], 'ABC')
+        self.assertEqual(result['platnik'], '')  # Platnik not mapped
     
     def test_map_dbf_record_with_partial_mapping(self):
         """Test mapping record with partial user mapping (some fields auto-detected)."""
@@ -504,6 +513,7 @@ class TestMapDBFRecord(unittest.TestCase):
         self.assertEqual(result['numer_dbf'], '12345')
         self.assertEqual(result['stawka'], '150.00')
         self.assertEqual(result['czesci'], 'ABC')
+        self.assertEqual(result['platnik'], '')  # Platnik not present
     
     def test_map_dbf_record_with_cena_alternative(self):
         """Test mapping record with CENA as alternative for stawka."""
@@ -519,6 +529,7 @@ class TestMapDBFRecord(unittest.TestCase):
         self.assertEqual(result['numer_dbf'], '12345')
         self.assertEqual(result['stawka'], '150.00')
         self.assertEqual(result['czesci'], 'ABC')
+        self.assertEqual(result['platnik'], '')  # Platnik not present
     
     def test_map_dbf_record_with_czesc_alternative(self):
         """Test mapping record with CZESC/PART as alternative for czesci."""
@@ -534,6 +545,7 @@ class TestMapDBFRecord(unittest.TestCase):
         self.assertEqual(result['numer_dbf'], '12345')
         self.assertEqual(result['stawka'], '150.00')
         self.assertEqual(result['czesci'], 'ABC')
+        self.assertEqual(result['platnik'], '')  # Platnik not present
 
 
 class TestReadDBFRecordsWithExtraFields(unittest.TestCase):
@@ -566,11 +578,13 @@ class TestReadDBFRecordsWithExtraFields(unittest.TestCase):
         self.assertEqual(records[0]['value'], '12345')
         self.assertEqual(records[0]['stawka'], '150.00')
         self.assertEqual(records[0]['czesci'], 'ABC')
+        self.assertEqual(records[0]['platnik'], '')  # Platnik not present in test DBF
         
         # Check second record
         self.assertEqual(records[1]['value'], '67890')
         self.assertEqual(records[1]['stawka'], '200.50')
         self.assertEqual(records[1]['czesci'], 'XYZ')
+        self.assertEqual(records[1]['platnik'], '')  # Platnik not present in test DBF
     
     def test_read_records_missing_extra_fields(self):
         """Test reading DBF records when extra fields are missing."""
@@ -587,6 +601,7 @@ class TestReadDBFRecordsWithExtraFields(unittest.TestCase):
         self.assertEqual(records[0]['value'], '12345')
         self.assertEqual(records[0]['stawka'], '')
         self.assertEqual(records[0]['czesci'], '')
+        self.assertEqual(records[0]['platnik'], '')  # Platnik not present
 
 
 class TestSearchDBFValuesWithExtraFields(unittest.TestCase):
@@ -628,12 +643,14 @@ class TestSearchDBFValuesWithExtraFields(unittest.TestCase):
         self.assertEqual(results[0]['dbfValue'], '12345')
         self.assertEqual(results[0]['stawka'], '')
         self.assertEqual(results[0]['czesci'], '')
+        self.assertEqual(results[0]['platnik'], '')  # Platnik not in simple values
         
         # Second value not found
         self.assertFalse(results[1]['found'])
         self.assertEqual(results[1]['dbfValue'], '99999')
         self.assertEqual(results[1]['stawka'], '')
         self.assertEqual(results[1]['czesci'], '')
+        self.assertEqual(results[1]['platnik'], '')  # Platnik not in simple values
     
     def test_search_with_record_dicts(self):
         """Test search with record dictionaries containing extra fields."""
@@ -656,8 +673,8 @@ class TestSearchDBFValuesWithExtraFields(unittest.TestCase):
         
         # Search with record dicts
         dbf_records = [
-            {'value': '12345', 'stawka': '150.00', 'czesci': 'ABC'},
-            {'value': '99999', 'stawka': '200.50', 'czesci': 'XYZ'}
+            {'value': '12345', 'stawka': '150.00', 'czesci': 'ABC', 'platnik': 'Company A'},
+            {'value': '99999', 'stawka': '200.50', 'czesci': 'XYZ', 'platnik': 'Company B'}
         ]
         
         results = search_dbf_values_in_sheets(
@@ -675,12 +692,14 @@ class TestSearchDBFValuesWithExtraFields(unittest.TestCase):
         self.assertEqual(results[0]['dbfValue'], '12345')
         self.assertEqual(results[0]['stawka'], '150.00')
         self.assertEqual(results[0]['czesci'], 'ABC')
+        self.assertEqual(results[0]['platnik'], 'Company A')  # Platnik preserved
         
         # Second record not found with extra fields preserved
         self.assertFalse(results[1]['found'])
         self.assertEqual(results[1]['dbfValue'], '99999')
         self.assertEqual(results[1]['stawka'], '200.50')
         self.assertEqual(results[1]['czesci'], 'XYZ')
+        self.assertEqual(results[1]['platnik'], 'Company B')  # Platnik preserved
 
 
 class TestFormatQuadraResultWithExtraFields(unittest.TestCase):
@@ -696,21 +715,23 @@ class TestFormatQuadraResultWithExtraFields(unittest.TestCase):
             'rowIndex': 5,
             'notes': 'Found in Sheet1 at B6',
             'stawka': '150.00',
-            'czesci': 'ABC'
+            'czesci': 'ABC',
+            'platnik': 'Company XYZ'
         }
         
         row = format_quadra_result_for_table(result)
         
-        # Expected format: [Arkusz, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi]
-        self.assertEqual(len(row), 8)
+        # Expected format: [Arkusz, Płatnik, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi]
+        self.assertEqual(len(row), 9)
         self.assertEqual(row[0], 'Sheet1')  # Arkusz
-        self.assertEqual(row[1], '12345')  # Numer z DBF
-        self.assertEqual(row[2], '150.00')  # Stawka
-        self.assertEqual(row[3], 'ABC')  # Czesci
-        self.assertEqual(row[4], 'Found')  # Status
-        self.assertEqual(row[5], 'Order')  # Kolumna
-        self.assertEqual(row[6], '6')  # Wiersz
-        self.assertEqual(row[7], 'Found in Sheet1 at B6')  # Uwagi
+        self.assertEqual(row[1], 'Company XYZ')  # Płatnik
+        self.assertEqual(row[2], '12345')  # Numer z DBF
+        self.assertEqual(row[3], '150.00')  # Stawka
+        self.assertEqual(row[4], 'ABC')  # Czesci
+        self.assertEqual(row[5], 'Found')  # Status
+        self.assertEqual(row[6], 'Order')  # Kolumna
+        self.assertEqual(row[7], '6')  # Wiersz
+        self.assertEqual(row[8], 'Found in Sheet1 at B6')  # Uwagi
     
     def test_format_result_missing(self):
         """Test formatting missing result with extra fields."""
@@ -722,21 +743,23 @@ class TestFormatQuadraResultWithExtraFields(unittest.TestCase):
             'rowIndex': None,
             'notes': 'Missing',
             'stawka': '200.50',
-            'czesci': 'XYZ'
+            'czesci': 'XYZ',
+            'platnik': 'Company ABC'
         }
         
         row = format_quadra_result_for_table(result)
         
-        # Expected format: [Arkusz, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi]
-        self.assertEqual(len(row), 8)
+        # Expected format: [Arkusz, Płatnik, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi]
+        self.assertEqual(len(row), 9)
         self.assertEqual(row[0], '')  # Arkusz
-        self.assertEqual(row[1], '99999')  # Numer z DBF
-        self.assertEqual(row[2], '200.50')  # Stawka
-        self.assertEqual(row[3], 'XYZ')  # Czesci
-        self.assertEqual(row[4], 'Missing')  # Status
-        self.assertEqual(row[5], '')  # Kolumna
-        self.assertEqual(row[6], '')  # Wiersz
-        self.assertEqual(row[7], 'Missing')  # Uwagi
+        self.assertEqual(row[1], 'Company ABC')  # Płatnik
+        self.assertEqual(row[2], '99999')  # Numer z DBF
+        self.assertEqual(row[3], '200.50')  # Stawka
+        self.assertEqual(row[4], 'XYZ')  # Czesci
+        self.assertEqual(row[5], 'Missing')  # Status
+        self.assertEqual(row[6], '')  # Kolumna
+        self.assertEqual(row[7], '')  # Wiersz
+        self.assertEqual(row[8], 'Missing')  # Uwagi
 
 
 class TestExportQuadraResultsWithExtraFields(unittest.TestCase):
