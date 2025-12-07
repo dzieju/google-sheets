@@ -117,32 +117,49 @@ Zakładka "Quadra" pozwala na porównanie numerów zleceń z pliku DBF z zawarto
 
 6. **Sprawdź**:
    - Kliknij "Sprawdź" aby rozpocząć porównanie
-   - Wyniki pojawią się w tabeli z następującymi kolumnami:
-     - **Numer z DBF**: Wartość z pliku DBF (główna kolumna wyszukiwania)
-     - **Stawka**: Wartość stawki z DBF (automatycznie wykrywana z pól: STAWKA, STAW, RATE, PRICE)
-     - **Status**: "Found" (znaleziono) lub "Missing" (brakuje)
+   - Wyniki pojawią się w tabeli z następującymi kolumnami (w kolejności):
      - **Arkusz**: Nazwa zakładki gdzie znaleziono wartość
+     - **Numer z DBF**: Wartość z pliku DBF (główna kolumna wyszukiwania)
+     - **Stawka**: Wartość stawki z DBF
+     - **Czesci**: Wartość części z DBF
+     - **Status**: "Found" (znaleziono) lub "Missing" (brakuje)
      - **Kolumna**: Nazwa kolumny gdzie znaleziono wartość
      - **Wiersz**: Numer wiersza gdzie znaleziono wartość
-     - **Czesci_extra**: Wartość części z DBF (automatycznie wykrywana z pól: CZESCI, PARTS)
      - **Uwagi**: Dodatkowe informacje
 
 7. **Eksport wyników**:
-   - **Eksportuj JSON**: Zapisz wyniki w formacie JSON (zawiera wszystkie pola w tym stawka i czesci)
-   - **Eksportuj CSV**: Zapisz wyniki w formacie CSV (zawiera wszystkie pola w tym stawka i czesci)
+   - **Eksportuj JSON**: Zapisz wyniki w formacie JSON (zawiera wszystkie pola: numer_dbf, stawka, czesci)
+   - **Eksportuj CSV**: Zapisz wyniki w formacie CSV (zawiera wszystkie pola: numer_dbf, stawka, czesci)
+
+### Konfiguracja mapowania pól DBF
+
+Po wybraniu pliku DBF możesz skonfigurować mapowanie pól:
+
+1. **Automatyczne wykrywanie** (domyślne):
+   - **Numer z DBF**: Wykrywany z pól: `NUMER`, `NUMBER`, `NR`, `ORDER`, `ZLECENIE`
+   - **Stawka**: Wykrywana z pól: `STAWKA`, `STAW`, `RATE`, `PRICE`, `CENA`
+   - **Części**: Wykrywana z pól: `CZESCI`, `PARTS`, `CZESC`, `PART`
+   
+2. **Ręczna konfiguracja**:
+   - Kliknij "Konfiguruj mapowanie pól" aby otworzyć panel konfiguracji
+   - Wybierz pola DBF z list rozwijanych dla każdego typu danych
+   - Kliknij "Zastosuj mapowanie" aby użyć własnego mapowania
+   - Kliknij "Resetuj" aby wrócić do autodetekcji
 
 ### Wykrywanie dodatkowych pól z DBF
 
 Aplikacja automatycznie wykrywa i wczytuje dodatkowe pola z pliku DBF:
 
-- **Stawka**: Wykrywana z pól o nazwach: `STAWKA`, `STAW`, `RATE`, `PRICE` (case-insensitive)
+- **Numer z DBF**: Wykrywany z pól o nazwach: `NUMER`, `NUMBER`, `NR`, `ORDER`, `ZLECENIE` (case-insensitive)
+  - Definiowane w stałej: `DBF_NUMER_FIELD_NAMES` w `quadra_service.py`
+- **Stawka**: Wykrywana z pól o nazwach: `STAWKA`, `STAW`, `RATE`, `PRICE`, `CENA` (case-insensitive)
   - Definiowane w stałej: `DBF_STAWKA_FIELD_NAMES` w `quadra_service.py`
-- **Części**: Wykrywana z pól o nazwach: `CZESCI`, `PARTS` (case-insensitive)
+- **Części**: Wykrywana z pól o nazwach: `CZESCI`, `PARTS`, `CZESC`, `PART` (case-insensitive)
   - Definiowane w stałej: `DBF_CZESCI_FIELD_NAMES` w `quadra_service.py`
 
 Jeśli pola nie istnieją w DBF, wyświetlane są puste wartości (bez błędu).
 
-**Uwaga dla deweloperów**: Aby dodać nowe alternatywne nazwy pól, edytuj stałe `DBF_STAWKA_FIELD_NAMES` i `DBF_CZESCI_FIELD_NAMES` w pliku `quadra_service.py`.
+**Uwaga dla deweloperów**: Aby dodać nowe alternatywne nazwy pól, edytuj stałe `DBF_NUMER_FIELD_NAMES`, `DBF_STAWKA_FIELD_NAMES` i `DBF_CZESCI_FIELD_NAMES` w pliku `quadra_service.py`.
 
 ### Przykładowe użycie
 
@@ -180,9 +197,9 @@ Jeśli pola nie istnieją w DBF, wyświetlane są puste wartości (bez błędu).
 
 Możesz zapisać wyniki sprawdzenia do arkusza Google Sheets używając funkcji `write_quadra_results_to_sheet`:
 
-- Dane zapisywane są do kolumn I (Stawka) i J (Czesci_extra)
+- Dane zapisywane są do kolumn I (Stawka) i J (Czesci)
 - Kolumny I i J są automatycznie tworzone/aktualizowane
-- Pierwszy wiersz zawiera nagłówki: "Stawka" i "Czesci_extra"
+- Pierwszy wiersz zawiera nagłówki: "Stawka" i "Czesci"
 - Zachowana jest kompatybilność z istniejącymi danymi w innych kolumnach
 
 ### Struktura eksportowanych danych
@@ -236,6 +253,32 @@ DBF_Value,Stawka,Status,SheetName,ColumnName,ColumnIndex,RowIndex,MatchedValue,C
 - Nie commituj `credentials.json` ani `token.json` do repo (dodane do .gitignore).
 
 ## Changelog
+
+### v3.2 - Quadra: Konfiguracja mapowania pól DBF i zmiana kolejności kolumn
+- **NOWOŚĆ**: Panel konfiguracji mapowania pól DBF
+  - Przycisk "Konfiguruj mapowanie pól" otwiera panel z listami rozwijanymi
+  - Możliwość ręcznego wyboru pól DBF dla: Numer z DBF, Stawka, Czesci
+  - Przyciski "Zastosuj mapowanie" i "Resetuj" do zarządzania konfiguracją
+  - Automatyczne załadowanie listy pól po wybraniu pliku DBF
+- **NOWOŚĆ**: Rozszerzone automatyczne wykrywanie pól DBF
+  - Numer z DBF: NUMER, NUMBER, NR, ORDER, ZLECENIE
+  - Stawka: STAWKA, STAW, RATE, PRICE, CENA (dodano CENA)
+  - Części: CZESCI, PARTS, CZESC, PART (dodano CZESC, PART)
+- **ZMIANA**: Nowa kolejność kolumn w tabeli wyników (Czesci obok Stawka)
+  - Arkusz, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi
+  - Wcześniej: Numer z DBF, Stawka, Status, Arkusz, Kolumna, Wiersz, Czesci_extra, Uwagi
+- **ZMIANA**: Zmiana nazwy kolumny z "Czesci_extra" na "Czesci"
+  - Zmiana w GUI, eksporcie JSON/CSV i zapisie do Google Sheets
+  - Kolumna J w Google Sheets ma teraz nagłówek "Czesci" zamiast "Czesci_extra"
+- **NOWOŚĆ**: Funkcja `get_dbf_field_names()` - odczyt nazw pól z DBF
+- **NOWOŚĆ**: Funkcja `map_dbf_record_to_result()` zwraca teraz również pole 'numer_dbf'
+  - Obsługa opcjonalnego parametru `mapping` dla ręcznej konfiguracji
+  - Kompatybilność wsteczna z istniejącym kodem
+- **NOWOŚĆ**: Rozbudowane testy jednostkowe (47 testów, wszystkie przechodzą)
+  - Testy mapowania użytkownika
+  - Testy alternatywnych nazw pól (CENA, CZESC, PART)
+  - Testy nowej kolejności kolumn w tabeli
+- Zachowana pełna kompatybilność wsteczna
 
 ### v3.1 - Quadra: Dodatkowe kolumny Stawka i Czesci z DBF
 - **NOWOŚĆ**: Automatyczne wykrywanie i wyświetlanie kolumny "Stawka" z DBF
