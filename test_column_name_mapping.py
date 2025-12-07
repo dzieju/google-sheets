@@ -5,7 +5,6 @@ Unit tests for column name mapping feature in main.py
 
 import unittest
 import json
-import sys
 from main import parse_column_names_arg, map_result_keys
 
 

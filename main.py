@@ -5,7 +5,6 @@ Prosty CLI do listowania i przeszukiwania arkuszy.
 
 import argparse
 import json
-import sys
 from google_auth import build_services
 from sheets_search import list_spreadsheets_owned_by_me, search_in_spreadsheets
 

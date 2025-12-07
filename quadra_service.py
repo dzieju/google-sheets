@@ -9,6 +9,8 @@ Functions:
 - format_quadra_results(results) - Format results for display and export
 """
 
+import csv
+import io
 import logging
 import re
 from typing import List, Dict, Any, Optional, Union, Tuple
@@ -791,9 +793,6 @@ def export_quadra_results_to_csv(
     Returns:
         CSV string with header and data rows
     """
-    import csv
-    import io
-    
     output = io.StringIO()
     writer = csv.writer(output)
     
