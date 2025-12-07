@@ -1763,7 +1763,7 @@ def main():
                     filtered_row = []
                     for idx in selected_indices:
                         if idx < len(row):
-                            # Escape HTML and handle None values
+                            # Handle None values and convert to string
                             cell_value = row[idx]
                             if cell_value is None:
                                 cell_value = ""
@@ -1776,14 +1776,6 @@ def main():
                         else:
                             filtered_row.append("")
                     filtered_data.append(filtered_row)
-                
-                # Get headers for selected columns
-                preview_headers = []
-                for idx in selected_indices:
-                    if idx < len(headers_info):
-                        preview_headers.append(headers_info[idx]['name'])
-                    else:
-                        preview_headers.append(f"Kolumna {idx + 1}")
                 
                 # Update preview table
                 # Note: PySimpleGUI Table doesn't support dynamic headers well, so we include headers as first row
