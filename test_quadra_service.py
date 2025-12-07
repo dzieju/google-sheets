@@ -26,6 +26,7 @@ from quadra_service import (
     search_value_in_sheet_data,
     search_dbf_values_in_sheets,
     format_quadra_result_for_table,
+    map_column_names,
     export_quadra_results_to_json,
     export_quadra_results_to_csv,
     write_quadra_results_to_sheet,
@@ -929,6 +930,245 @@ class TestWriteQuadraResultsToSheet(unittest.TestCase):
             )
         
         self.assertIn("Sheet 'Sheet1' not found", str(cm.exception))
+
+
+class TestMapColumnNames(unittest.TestCase):
+    """Tests for map_column_names function."""
+    
+    def test_map_with_dict(self):
+        """Test mapping with dictionary."""
+        from quadra_service import map_column_names
+        
+        original = ['dbfValue', 'stawka', 'status']
+        mapping = {'dbfValue': 'Numer', 'stawka': 'Kwota'}
+        result = map_column_names(original, mapping)
+        
+        self.assertEqual(result, ['Numer', 'Kwota', 'status'])
+    
+    def test_map_with_list(self):
+        """Test mapping with list."""
+        from quadra_service import map_column_names
+        
+        original = ['dbfValue', 'stawka', 'status']
+        mapping = ['Numer', 'Kwota', 'Stan']
+        result = map_column_names(original, mapping)
+        
+        self.assertEqual(result, ['Numer', 'Kwota', 'Stan'])
+    
+    def test_map_with_list_fewer_elements(self):
+        """Test mapping with list that has fewer elements than original."""
+        from quadra_service import map_column_names
+        
+        original = ['dbfValue', 'stawka', 'status']
+        mapping = ['Numer', 'Kwota']  # Missing third element
+        result = map_column_names(original, mapping)
+        
+        # Should use original for missing elements
+        self.assertEqual(result, ['Numer', 'Kwota', 'status'])
+    
+    def test_map_with_none(self):
+        """Test mapping with None - should return original."""
+        from quadra_service import map_column_names
+        
+        original = ['dbfValue', 'stawka', 'status']
+        result = map_column_names(original, None)
+        
+        self.assertEqual(result, original)
+    
+    def test_map_with_empty_dict(self):
+        """Test mapping with empty dict - should return original."""
+        from quadra_service import map_column_names
+        
+        original = ['dbfValue', 'stawka', 'status']
+        result = map_column_names(original, {})
+        
+        self.assertEqual(result, original)
+
+
+class TestExportWithColumnNames(unittest.TestCase):
+    """Tests for export functions with custom column names."""
+    
+    def test_export_csv_with_dict_column_names(self):
+        """Test CSV export with dictionary column name mapping."""
+        results = [
+            {
+                'dbfValue': '12345',
+                'stawka': '150.00',
+                'czesci': 'ABC',
+                'found': True,
+                'sheetName': 'Sheet1',
+                'columnName': 'Numer',
+                'columnIndex': 0,
+                'rowIndex': 1,
+                'matchedValue': '12345',
+                'notes': 'Test'
+            }
+        ]
+        
+        column_names = {
+            'DBF_Value': 'Wartość DBF',
+            'Stawka': 'Cena',
+            'Status': 'Stan'
+        }
+        
+        csv_output = export_quadra_results_to_csv(results, column_names)
+        lines = csv_output.strip().split('\n')
+        
+        # Check header
+        header = lines[0]
+        self.assertIn('Wartość DBF', header)
+        self.assertIn('Cena', header)
+        self.assertIn('Stan', header)
+    
+    def test_export_csv_with_list_column_names(self):
+        """Test CSV export with list column name mapping."""
+        results = [
+            {
+                'dbfValue': '12345',
+                'stawka': '150.00',
+                'czesci': 'ABC',
+                'found': True,
+                'sheetName': 'Sheet1',
+                'columnName': 'Numer',
+                'columnIndex': 0,
+                'rowIndex': 1,
+                'matchedValue': '12345',
+                'notes': 'Test'
+            }
+        ]
+        
+        column_names = ['Wartość', 'Cena', 'Stan', 'Arkusz', 'Kolumna', 
+                       'Indeks kolumny', 'Indeks wiersza', 'Znaleziona wartość', 
+                       'Części', 'Notatki']
+        
+        csv_output = export_quadra_results_to_csv(results, column_names)
+        lines = csv_output.strip().split('\n')
+        
+        # Check header
+        header = lines[0]
+        self.assertIn('Wartość', header)
+        self.assertIn('Cena', header)
+        self.assertIn('Stan', header)
+    
+    def test_export_csv_without_column_names(self):
+        """Test CSV export without column name mapping (backward compatibility)."""
+        results = [
+            {
+                'dbfValue': '12345',
+                'stawka': '150.00',
+                'czesci': 'ABC',
+                'found': True,
+                'sheetName': 'Sheet1',
+                'columnName': 'Numer',
+                'columnIndex': 0,
+                'rowIndex': 1,
+                'matchedValue': '12345',
+                'notes': 'Test'
+            }
+        ]
+        
+        csv_output = export_quadra_results_to_csv(results)
+        lines = csv_output.strip().split('\n')
+        
+        # Check default header
+        header = lines[0]
+        self.assertIn('DBF_Value', header)
+        self.assertIn('Stawka', header)
+        self.assertIn('Status', header)
+    
+    def test_export_json_with_dict_column_names(self):
+        """Test JSON export with dictionary column name mapping."""
+        results = [
+            {
+                'dbfValue': '12345',
+                'stawka': '150.00',
+                'czesci': 'ABC',
+                'found': True,
+                'sheetName': 'Sheet1',
+                'columnName': 'Numer',
+                'columnIndex': 0,
+                'rowIndex': 1,
+                'matchedValue': '12345',
+                'notes': 'Test'
+            }
+        ]
+        
+        column_names = {
+            'dbfValue': 'wartoscDBF',
+            'stawka': 'cena',
+            'status': 'stan'
+        }
+        
+        json_output = export_quadra_results_to_json(results, column_names)
+        
+        # Check that custom keys are used
+        self.assertEqual(len(json_output), 1)
+        result = json_output[0]
+        self.assertIn('wartoscDBF', result)
+        self.assertIn('cena', result)
+        self.assertIn('stan', result)
+        self.assertEqual(result['wartoscDBF'], '12345')
+        self.assertEqual(result['cena'], '150.00')
+    
+    def test_export_json_with_list_column_names(self):
+        """Test JSON export with list column name mapping."""
+        results = [
+            {
+                'dbfValue': '12345',
+                'stawka': '150.00',
+                'czesci': 'ABC',
+                'found': True,
+                'sheetName': 'Sheet1',
+                'columnName': 'Numer',
+                'columnIndex': 0,
+                'rowIndex': 1,
+                'matchedValue': '12345',
+                'notes': 'Test'
+            }
+        ]
+        
+        column_names = ['wartoscDBF', 'cena', 'stan', 'nazwaArkusza', 'nazwaKolumny',
+                       'indeksKolumny', 'indeksWiersza', 'znalezionaWartosc', 
+                       'czesci', 'notatki']
+        
+        json_output = export_quadra_results_to_json(results, column_names)
+        
+        # Check that custom keys are used
+        self.assertEqual(len(json_output), 1)
+        result = json_output[0]
+        self.assertIn('wartoscDBF', result)
+        self.assertIn('cena', result)
+        self.assertIn('stan', result)
+        self.assertEqual(result['wartoscDBF'], '12345')
+        self.assertEqual(result['cena'], '150.00')
+    
+    def test_export_json_without_column_names(self):
+        """Test JSON export without column name mapping (backward compatibility)."""
+        results = [
+            {
+                'dbfValue': '12345',
+                'stawka': '150.00',
+                'czesci': 'ABC',
+                'found': True,
+                'sheetName': 'Sheet1',
+                'columnName': 'Numer',
+                'columnIndex': 0,
+                'rowIndex': 1,
+                'matchedValue': '12345',
+                'notes': 'Test'
+            }
+        ]
+        
+        json_output = export_quadra_results_to_json(results)
+        
+        # Check default keys are used
+        self.assertEqual(len(json_output), 1)
+        result = json_output[0]
+        self.assertIn('dbfValue', result)
+        self.assertIn('stawka', result)
+        self.assertIn('status', result)
+        self.assertEqual(result['dbfValue'], '12345')
+        self.assertEqual(result['stawka'], '150.00')
 
 
 if __name__ == '__main__':
