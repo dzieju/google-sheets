@@ -937,8 +937,6 @@ class TestMapColumnNames(unittest.TestCase):
     
     def test_map_with_dict(self):
         """Test mapping with dictionary."""
-        from quadra_service import map_column_names
-        
         original = ['dbfValue', 'stawka', 'status']
         mapping = {'dbfValue': 'Numer', 'stawka': 'Kwota'}
         result = map_column_names(original, mapping)
@@ -947,8 +945,6 @@ class TestMapColumnNames(unittest.TestCase):
     
     def test_map_with_list(self):
         """Test mapping with list."""
-        from quadra_service import map_column_names
-        
         original = ['dbfValue', 'stawka', 'status']
         mapping = ['Numer', 'Kwota', 'Stan']
         result = map_column_names(original, mapping)
@@ -957,8 +953,6 @@ class TestMapColumnNames(unittest.TestCase):
     
     def test_map_with_list_fewer_elements(self):
         """Test mapping with list that has fewer elements than original."""
-        from quadra_service import map_column_names
-        
         original = ['dbfValue', 'stawka', 'status']
         mapping = ['Numer', 'Kwota']  # Missing third element
         result = map_column_names(original, mapping)
@@ -968,8 +962,6 @@ class TestMapColumnNames(unittest.TestCase):
     
     def test_map_with_none(self):
         """Test mapping with None - should return original."""
-        from quadra_service import map_column_names
-        
         original = ['dbfValue', 'stawka', 'status']
         result = map_column_names(original, None)
         
@@ -977,8 +969,6 @@ class TestMapColumnNames(unittest.TestCase):
     
     def test_map_with_empty_dict(self):
         """Test mapping with empty dict - should return original."""
-        from quadra_service import map_column_names
-        
         original = ['dbfValue', 'stawka', 'status']
         result = map_column_names(original, {})
         
