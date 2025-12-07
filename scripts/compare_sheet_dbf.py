@@ -179,8 +179,10 @@ def main():
             print(f'Kolumna "{col}" nie znaleziona w odczytanym arkuszu. Dostępne kolumny: {list(sheet_df.columns)}', file=sys.stderr)
             sys.exit(3)
         # zachowujemy też klucz, zakładamy że user podał --key
-        sheet_df = sheet_df[[args.key, col]] if args.key in sheet_df.columns else sheet_df[[col]]
-        # jeśli --key nie było w dataframe to użytkownik musi zapewnić klucz w innym miejscu
+        if args.key not in sheet_df.columns:
+            print(f'Klucz "{args.key}" nie znaleziony w odczytanym arkuszu. Dostępne kolumny: {list(sheet_df.columns)}', file=sys.stderr)
+            sys.exit(3)
+        sheet_df = sheet_df[[args.key, col]]
     try:
         dbf_df = read_dbf(args.dbf_path, encoding=args.dbf_encoding)
     except Exception as e:
