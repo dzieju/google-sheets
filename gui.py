@@ -487,10 +487,11 @@ def quadra_check_thread_func(window, dbf_path, dbf_column, spreadsheet_id, mode,
         
         quadra_stop_flag.clear()
         
-        # Read DBF file
+        # Read DBF file with extra fields (stawka, czesci)
         try:
-            dbf_values = read_dbf_column(dbf_path, dbf_column)
-            if not dbf_values:
+            from quadra_service import read_dbf_records_with_extra_fields
+            dbf_records = read_dbf_records_with_extra_fields(dbf_path, dbf_column)
+            if not dbf_records:
                 window.write_event_value(EVENT_ERROR, "Brak wartości w wybranej kolumnie DBF.")
                 window.write_event_value(EVENT_QUADRA_CHECK_DONE, "error")
                 return
@@ -504,7 +505,7 @@ def quadra_check_thread_func(window, dbf_path, dbf_column, spreadsheet_id, mode,
             results = search_dbf_values_in_sheets(
                 drive_service=drive_service,
                 sheets_service=sheets_service,
-                dbf_values=dbf_values,
+                dbf_values=dbf_records,
                 spreadsheet_id=spreadsheet_id,
                 mode=mode,
                 sheet_names=sheet_names,
@@ -641,7 +642,8 @@ def create_single_sheet_search_tab():
 
 def create_quadra_tab():
     """Create Quadra tab layout for checking DBF order numbers against Google Sheets."""
-    table_headings = ["Numer z DBF", "Status", "Arkusz", "Kolumna", "Wiersz", "Uwagi"]
+    # Updated table headings: Numer z DBF, Stawka, Status, Arkusz, Kolumna, Wiersz, Czesci_extra, Uwagi
+    table_headings = ["Numer z DBF", "Stawka", "Status", "Arkusz", "Kolumna", "Wiersz", "Czesci_extra", "Uwagi"]
     
     return [
         [sg.Text("Quadra: Sprawdzanie numerów zleceń z DBF", font=("Helvetica", 12, "bold"))],
