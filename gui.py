@@ -531,6 +531,26 @@ def quadra_check_thread_func(window, dbf_path, dbf_column, spreadsheet_id, mode,
         window.write_event_value(EVENT_QUADRA_CHECK_DONE, "error")
 
 
+def normalize_value_for_missing_check(val, numeric_only_mode):
+    """
+    Normalize value for comparison in missing value checks.
+    
+    Args:
+        val: Value to normalize
+        numeric_only_mode: If True, removes all non-digit characters
+    
+    Returns:
+        Normalized string value (lowercase, trimmed, optionally digits only)
+    """
+    if val is None:
+        return ""
+    s = str(val).strip().lower()
+    if numeric_only_mode:
+        # Remove all non-digit characters
+        s = ''.join(c for c in s if c.isdigit())
+    return s
+
+
 def quadra_find_missing_thread_func(window, dbf_path, dbf_column, spreadsheet_id, sheet_name, sheet_column, skip_header, numeric_only):
     """
     Find values from Google Sheet column that are missing in DBF file.
@@ -564,7 +584,7 @@ def quadra_find_missing_thread_func(window, dbf_path, dbf_column, spreadsheet_id
             # Try to use read_dbf_column first
             try:
                 dbf_values = read_dbf_column(dbf_path, dbf_column)
-            except Exception:
+            except (FileNotFoundError, ValueError) as e:
                 # Fallback to read_dbf_records_with_extra_fields
                 dbf_records = read_dbf_records_with_extra_fields(dbf_path, dbf_column)
                 dbf_values = [rec['value'] for rec in dbf_records if rec.get('value')]
@@ -574,23 +594,13 @@ def quadra_find_missing_thread_func(window, dbf_path, dbf_column, spreadsheet_id
                 window.write_event_value(EVENT_QUADRA_MISSING_DONE, "error")
                 return
                 
-        except Exception as e:
+        except (FileNotFoundError, ValueError) as e:
             window.write_event_value(EVENT_ERROR, f"Błąd odczytu pliku DBF: {e}")
             window.write_event_value(EVENT_QUADRA_MISSING_DONE, "error")
             return
         
         # Normalize DBF values and create a set for fast lookup
-        def normalize_value(val, numeric_only_mode):
-            """Normalize value for comparison."""
-            if val is None:
-                return ""
-            s = str(val).strip().lower()
-            if numeric_only_mode:
-                # Remove all non-digit characters
-                s = ''.join(c for c in s if c.isdigit())
-            return s
-        
-        dbf_set = {normalize_value(v, numeric_only) for v in dbf_values if v}
+        dbf_set = {normalize_value_for_missing_check(v, numeric_only) for v in dbf_values if v}
         dbf_set.discard('')  # Remove empty strings
         
         # Read values from Google Sheet column
@@ -625,7 +635,7 @@ def quadra_find_missing_thread_func(window, dbf_path, dbf_column, spreadsheet_id
         sheet_values_original = []
         for val in sheet_values_raw:
             if val:
-                normalized = normalize_value(val, numeric_only)
+                normalized = normalize_value_for_missing_check(val, numeric_only)
                 if normalized:  # Only add non-empty normalized values
                     sheet_values_normalized.append(normalized)
                     sheet_values_original.append(str(val).strip())
@@ -895,6 +905,12 @@ def main():
         finalize=True,
         resizable=True
     )
+    
+    # Initialize window metadata for storing various results
+    window.metadata = {
+        'quadra_results': [],
+        'quadra_missing_results': []
+    }
 
     # State for search results (for JSON export)
     search_results_list = []
@@ -1731,8 +1747,6 @@ def main():
                 window["-STATUS_BAR-"].update("Wyszukiwanie zakończone z błędem.")
             else:
                 # Store full results in metadata for future export
-                if not hasattr(window, 'metadata'):
-                    window.metadata = {}
                 window.metadata['quadra_missing_results'] = results.get('missing_values', [])
                 
                 # Show popup with results
@@ -1784,16 +1798,16 @@ def main():
                 window["-STATUS_BAR-"].update(f"Sprawdzanie zakończone. Znaleziono: {found_count}, brakujących: {missing_count}")
                 
                 # Store results for export
-                window.metadata = {'quadra_results': results}
+                window.metadata['quadra_results'] = results
 
         elif event == "-QUADRA_CLEAR_RESULTS-":
             window["-QUADRA_RESULTS_TABLE-"].update(values=[])
             window["-QUADRA_STATUS-"].update("Znaleziono: 0 | Brakujących: 0")
             window["-STATUS_BAR-"].update("Wyniki wyczyszczone.")
-            window.metadata = {'quadra_results': []}
+            window.metadata['quadra_results'] = []
 
         elif event == "-QUADRA_EXPORT_JSON-":
-            results = window.metadata.get('quadra_results', []) if hasattr(window, 'metadata') else []
+            results = window.metadata.get('quadra_results', [])
             if not results:
                 sg.popup("Brak wyników do eksportu.", title="Eksport JSON")
                 continue
@@ -1815,7 +1829,7 @@ def main():
                     sg.popup_error(f"Błąd zapisu JSON: {e}")
 
         elif event == "-QUADRA_EXPORT_CSV-":
-            results = window.metadata.get('quadra_results', []) if hasattr(window, 'metadata') else []
+            results = window.metadata.get('quadra_results', [])
             if not results:
                 sg.popup("Brak wyników do eksportu.", title="Eksport CSV")
                 continue
