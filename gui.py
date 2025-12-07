@@ -747,6 +747,7 @@ def create_layout():
 def main():
     """Main function - runs the GUI event loop."""
     global drive_service, sheets_service, search_thread, ss_search_thread, dup_search_thread
+    global quadra_dbf_field_mapping, quadra_dbf_field_names
 
     sg.theme("SystemDefault")
 
@@ -1368,7 +1369,6 @@ def main():
             dbf_path = values["-QUADRA_DBF_PATH-"].strip()
             if dbf_path and os.path.exists(dbf_path):
                 try:
-                    global quadra_dbf_field_names
                     quadra_dbf_field_names = get_dbf_field_names(dbf_path)
                     
                     # Update mapping dropdowns with field names
@@ -1404,7 +1404,6 @@ def main():
         
         elif event == "-QUADRA_APPLY_MAPPING-":
             # Apply user-configured mapping
-            global quadra_dbf_field_mapping
             quadra_dbf_field_mapping = {}
             
             numer_field = values["-QUADRA_MAP_NUMER-"]
@@ -1424,7 +1423,6 @@ def main():
         
         elif event == "-QUADRA_RESET_MAPPING-":
             # Reset to auto-detection
-            global quadra_dbf_field_mapping
             quadra_dbf_field_mapping = {}
             
             # Re-detect and set default values if DBF is loaded
@@ -1494,7 +1492,7 @@ def main():
             window["-STATUS_BAR-"].update(f"Sprawdzanie numerów z DBF w arkuszu {spreadsheet_name}...")
             
             # Start check thread
-            global quadra_check_thread, quadra_dbf_field_mapping
+            global quadra_check_thread
             quadra_check_thread = threading.Thread(
                 target=quadra_check_thread_func,
                 args=(
