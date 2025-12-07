@@ -40,6 +40,41 @@ from quadra_service import (
 )
 
 
+# -------------------- Settings persistence --------------------
+# Path to settings file for persistent app configuration
+SETTINGS_FILE = os.path.join(os.path.expanduser('~'), '.google_sheets_settings.json')
+
+
+def load_settings():
+    """
+    Load application settings from JSON file.
+    Returns empty dict if file doesn't exist or is corrupted.
+    Used to restore user preferences like DBF mappings and last used paths.
+    """
+    if not os.path.exists(SETTINGS_FILE):
+        return {}
+    try:
+        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        # If file is corrupted or unreadable, return empty dict
+        return {}
+
+
+def save_settings(settings):
+    """
+    Save application settings to JSON file.
+    Persists user preferences like DBF field mappings and last used paths
+    so they are remembered between application runs.
+    """
+    try:
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+    except OSError:
+        # If we can't save settings, silently fail (non-critical)
+        pass
+
+
 # -------------------- Events --------------------
 EVENT_AUTH_DONE = "-AUTH_DONE-"
 EVENT_FILES_LOADED = "-FILES_LOADED-"
@@ -670,6 +705,7 @@ def create_quadra_tab():
             [sg.Text("Numer z DBF:", size=(15, 1)), sg.Combo(values=[], key="-QUADRA_MAP_NUMER-", readonly=True, size=(20, 1))],
             [sg.Text("Stawka:", size=(15, 1)), sg.Combo(values=[], key="-QUADRA_MAP_STAWKA-", readonly=True, size=(20, 1))],
             [sg.Text("Części:", size=(15, 1)), sg.Combo(values=[], key="-QUADRA_MAP_CZESCI-", readonly=True, size=(20, 1))],
+            [sg.Text("Płatnik:", size=(15, 1)), sg.Combo(values=[], key="-QUADRA_MAP_PLATNIK-", readonly=True, size=(20, 1))],
             [sg.Button("Zastosuj mapowanie", key="-QUADRA_APPLY_MAPPING-"), sg.Button("Resetuj", key="-QUADRA_RESET_MAPPING-")],
         ], key="-QUADRA_MAPPING_PANEL-", visible=False))],
         
@@ -772,6 +808,15 @@ def main():
     dup_results_list = []
     dup_table_data = []  # Data for the duplicates table
 
+    # Load settings and restore last DBF path
+    app_settings = load_settings()
+    window.metadata = {'_app_settings': app_settings}
+    
+    # Restore last DBF path if it exists
+    last_dbf_path = app_settings.get('quadra_last_dbf_path', '')
+    if last_dbf_path and os.path.exists(last_dbf_path):
+        window["-QUADRA_DBF_PATH-"].update(value=last_dbf_path)
+    
     # Update token status on startup
     window["-TOKEN_EXISTS-"].update("Tak" if os.path.exists(TOKEN_FILE) else "Nie")
 
@@ -1376,18 +1421,61 @@ def main():
                     window["-QUADRA_MAP_NUMER-"].update(values=field_options, value='')
                     window["-QUADRA_MAP_STAWKA-"].update(values=field_options, value='')
                     window["-QUADRA_MAP_CZESCI-"].update(values=field_options, value='')
+                    window["-QUADRA_MAP_PLATNIK-"].update(values=field_options, value='')
                     
-                    # Auto-detect and set default values
-                    numer_field = detect_dbf_field_name(quadra_dbf_field_names, DBF_NUMER_FIELD_NAMES)
-                    stawka_field = detect_dbf_field_name(quadra_dbf_field_names, DBF_STAWKA_FIELD_NAMES)
-                    czesci_field = detect_dbf_field_name(quadra_dbf_field_names, DBF_CZESCI_FIELD_NAMES)
+                    # Get saved settings from window metadata
+                    app_settings = window.metadata.get('_app_settings', {})
+                    saved_mapping = app_settings.get('quadra_dbf_field_mapping', {})
                     
-                    if numer_field:
-                        window["-QUADRA_MAP_NUMER-"].update(value=numer_field)
-                    if stawka_field:
-                        window["-QUADRA_MAP_STAWKA-"].update(value=stawka_field)
-                    if czesci_field:
-                        window["-QUADRA_MAP_CZESCI-"].update(value=czesci_field)
+                    # If we have saved mappings, try to restore them if fields exist in current DBF
+                    if saved_mapping:
+                        numer_field = saved_mapping.get('numer_dbf', '')
+                        stawka_field = saved_mapping.get('stawka', '')
+                        czesci_field = saved_mapping.get('czesci', '')
+                        platnik_field = saved_mapping.get('platnik', '')
+                        
+                        # Only restore if field exists in current DBF
+                        if numer_field in quadra_dbf_field_names:
+                            window["-QUADRA_MAP_NUMER-"].update(value=numer_field)
+                        else:
+                            # Auto-detect if saved mapping doesn't exist
+                            numer_field = detect_dbf_field_name(quadra_dbf_field_names, DBF_NUMER_FIELD_NAMES)
+                            if numer_field:
+                                window["-QUADRA_MAP_NUMER-"].update(value=numer_field)
+                        
+                        if stawka_field in quadra_dbf_field_names:
+                            window["-QUADRA_MAP_STAWKA-"].update(value=stawka_field)
+                        else:
+                            stawka_field = detect_dbf_field_name(quadra_dbf_field_names, DBF_STAWKA_FIELD_NAMES)
+                            if stawka_field:
+                                window["-QUADRA_MAP_STAWKA-"].update(value=stawka_field)
+                        
+                        if czesci_field in quadra_dbf_field_names:
+                            window["-QUADRA_MAP_CZESCI-"].update(value=czesci_field)
+                        else:
+                            czesci_field = detect_dbf_field_name(quadra_dbf_field_names, DBF_CZESCI_FIELD_NAMES)
+                            if czesci_field:
+                                window["-QUADRA_MAP_CZESCI-"].update(value=czesci_field)
+                        
+                        if platnik_field in quadra_dbf_field_names:
+                            window["-QUADRA_MAP_PLATNIK-"].update(value=platnik_field)
+                    else:
+                        # Auto-detect and set default values
+                        numer_field = detect_dbf_field_name(quadra_dbf_field_names, DBF_NUMER_FIELD_NAMES)
+                        stawka_field = detect_dbf_field_name(quadra_dbf_field_names, DBF_STAWKA_FIELD_NAMES)
+                        czesci_field = detect_dbf_field_name(quadra_dbf_field_names, DBF_CZESCI_FIELD_NAMES)
+                        
+                        if numer_field:
+                            window["-QUADRA_MAP_NUMER-"].update(value=numer_field)
+                        if stawka_field:
+                            window["-QUADRA_MAP_STAWKA-"].update(value=stawka_field)
+                        if czesci_field:
+                            window["-QUADRA_MAP_CZESCI-"].update(value=czesci_field)
+                    
+                    # Save the DBF path to settings
+                    app_settings['quadra_last_dbf_path'] = dbf_path
+                    window.metadata['_app_settings'] = app_settings
+                    save_settings(app_settings)
                     
                     window["-STATUS_BAR-"].update(f"Załadowano plik DBF: {len(quadra_dbf_field_names)} pól wykrytych")
                 except Exception as e:
@@ -1408,7 +1496,7 @@ def main():
             panel.metadata['visible'] = new_visible
         
         elif event == "-QUADRA_APPLY_MAPPING-":
-            # Apply user-configured mapping
+            # Apply user-configured mapping and save to settings
             quadra_dbf_field_mapping = {}
             
             numer_field = values["-QUADRA_MAP_NUMER-"]
@@ -1423,11 +1511,21 @@ def main():
             if czesci_field:
                 quadra_dbf_field_mapping['czesci'] = czesci_field
             
+            platnik_field = values["-QUADRA_MAP_PLATNIK-"]
+            if platnik_field:
+                quadra_dbf_field_mapping['platnik'] = platnik_field
+            
+            # Save mapping to settings
+            app_settings = window.metadata.get('_app_settings', {})
+            app_settings['quadra_dbf_field_mapping'] = quadra_dbf_field_mapping
+            window.metadata['_app_settings'] = app_settings
+            save_settings(app_settings)
+            
             sg.popup(f"Mapowanie zastosowane:\n{quadra_dbf_field_mapping}", title="Mapowanie")
-            window["-STATUS_BAR-"].update("Mapowanie pól DBF zastosowane")
+            window["-STATUS_BAR-"].update("Mapowanie pól DBF zastosowane i zapisane")
         
         elif event == "-QUADRA_RESET_MAPPING-":
-            # Reset to auto-detection
+            # Reset to auto-detection and clear saved mapping
             quadra_dbf_field_mapping = {}
             
             # Re-detect and set default values if DBF is loaded
@@ -1439,6 +1537,14 @@ def main():
                 window["-QUADRA_MAP_NUMER-"].update(value=numer_field or '')
                 window["-QUADRA_MAP_STAWKA-"].update(value=stawka_field or '')
                 window["-QUADRA_MAP_CZESCI-"].update(value=czesci_field or '')
+                window["-QUADRA_MAP_PLATNIK-"].update(value='')
+            
+            # Remove saved mapping from settings
+            app_settings = window.metadata.get('_app_settings', {})
+            if 'quadra_dbf_field_mapping' in app_settings:
+                del app_settings['quadra_dbf_field_mapping']
+            window.metadata['_app_settings'] = app_settings
+            save_settings(app_settings)
             
             window["-STATUS_BAR-"].update("Mapowanie zresetowane do autodetekcji")
 
@@ -1539,14 +1645,18 @@ def main():
                 window["-QUADRA_STATUS-"].update(f"Znaleziono: {found_count} | Brakujących: {missing_count}")
                 window["-STATUS_BAR-"].update(f"Sprawdzanie zakończone. Znaleziono: {found_count}, brakujących: {missing_count}")
                 
-                # Store results for export
-                window.metadata = {'quadra_results': results}
+                # Store results for export (preserve existing metadata)
+                if not hasattr(window, 'metadata') or window.metadata is None:
+                    window.metadata = {}
+                window.metadata['quadra_results'] = results
 
         elif event == "-QUADRA_CLEAR_RESULTS-":
             window["-QUADRA_RESULTS_TABLE-"].update(values=[])
             window["-QUADRA_STATUS-"].update("Znaleziono: 0 | Brakujących: 0")
             window["-STATUS_BAR-"].update("Wyniki wyczyszczone.")
-            window.metadata = {'quadra_results': []}
+            if not hasattr(window, 'metadata') or window.metadata is None:
+                window.metadata = {}
+            window.metadata['quadra_results'] = []
 
         elif event == "-QUADRA_EXPORT_JSON-":
             results = window.metadata.get('quadra_results', []) if hasattr(window, 'metadata') else []
@@ -1598,6 +1708,10 @@ def main():
             sg.popup_error(error_msg)
             window["-STATUS_BAR-"].update(f"Błąd: {error_msg}")
 
+    # Save settings before closing
+    if hasattr(window, 'metadata') and '_app_settings' in window.metadata:
+        save_settings(window.metadata['_app_settings'])
+    
     window.close()
 
 
