@@ -31,6 +31,12 @@ from quadra_service import (
     format_quadra_result_for_table,
     export_quadra_results_to_json,
     export_quadra_results_to_csv,
+    get_dbf_field_names,
+    read_dbf_records_with_extra_fields,
+    detect_dbf_field_name,
+    DBF_NUMER_FIELD_NAMES,
+    DBF_STAWKA_FIELD_NAMES,
+    DBF_CZESCI_FIELD_NAMES,
 )
 
 
@@ -74,6 +80,8 @@ quadra_current_spreadsheets = []
 quadra_current_sheets = []
 quadra_check_thread = None
 quadra_stop_flag = threading.Event()
+quadra_dbf_field_mapping = {}  # Stores user-configured DBF field mapping
+quadra_dbf_field_names = []  # Stores available DBF field names
 
 
 # -------------------- Helper functions --------------------
@@ -477,7 +485,7 @@ def quadra_load_sheets_thread(window, spreadsheet_id, spreadsheet_name):
         window.write_event_value(EVENT_ERROR, f"Błąd ładowania arkuszy: {e}")
 
 
-def quadra_check_thread_func(window, dbf_path, dbf_column, spreadsheet_id, mode, sheet_names, column_names):
+def quadra_check_thread_func(window, dbf_path, dbf_column, spreadsheet_id, mode, sheet_names, column_names, mapping=None):
     """Run Quadra check in background thread."""
     global quadra_stop_flag
     try:
@@ -490,7 +498,7 @@ def quadra_check_thread_func(window, dbf_path, dbf_column, spreadsheet_id, mode,
         # Read DBF file with extra fields (stawka, czesci)
         try:
             from quadra_service import read_dbf_records_with_extra_fields
-            dbf_records = read_dbf_records_with_extra_fields(dbf_path, dbf_column)
+            dbf_records = read_dbf_records_with_extra_fields(dbf_path, dbf_column, mapping)
             if not dbf_records:
                 window.write_event_value(EVENT_ERROR, "Brak wartości w wybranej kolumnie DBF.")
                 window.write_event_value(EVENT_QUADRA_CHECK_DONE, "error")
@@ -642,18 +650,28 @@ def create_single_sheet_search_tab():
 
 def create_quadra_tab():
     """Create Quadra tab layout for checking DBF order numbers against Google Sheets."""
-    # Updated table headings: Numer z DBF, Stawka, Status, Arkusz, Kolumna, Wiersz, Czesci_extra, Uwagi
-    table_headings = ["Numer z DBF", "Stawka", "Status", "Arkusz", "Kolumna", "Wiersz", "Czesci_extra", "Uwagi"]
+    # Updated table headings: Arkusz, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi
+    table_headings = ["Arkusz", "Numer z DBF", "Stawka", "Czesci", "Status", "Kolumna", "Wiersz", "Uwagi"]
     
     return [
         [sg.Text("Quadra: Sprawdzanie numerów zleceń z DBF", font=("Helvetica", 12, "bold"))],
         [sg.HorizontalSeparator()],
         
         # DBF file selection
-        [sg.Text("Plik DBF:", size=(15, 1)), sg.Input(key="-QUADRA_DBF_PATH-", expand_x=True, readonly=True), 
+        [sg.Text("Plik DBF:", size=(15, 1)), sg.Input(key="-QUADRA_DBF_PATH-", expand_x=True, readonly=True, enable_events=True), 
          sg.FileBrowse("Wybierz plik DBF", key="-QUADRA_DBF_BROWSE-", file_types=(("DBF Files", "*.dbf"), ("All Files", "*.*")))],
         [sg.Text("Kolumna DBF:", size=(15, 1)), sg.Input(key="-QUADRA_DBF_COLUMN-", default_text="B", size=(10, 1)),
-         sg.Text("(litera A, B, C... lub numer 1, 2, 3...)")],
+         sg.Text("(litera A, B, C... lub numer 1, 2, 3...)"),
+         sg.Button("Konfiguruj mapowanie pól", key="-QUADRA_CONFIG_MAPPING-", size=(20, 1))],
+        
+        # DBF field mapping panel (initially hidden)
+        [sg.pin(sg.Column([
+            [sg.Text("Mapowanie pól DBF:", font=("Helvetica", 10, "bold"))],
+            [sg.Text("Numer z DBF:", size=(15, 1)), sg.Combo(values=[], key="-QUADRA_MAP_NUMER-", readonly=True, size=(20, 1))],
+            [sg.Text("Stawka:", size=(15, 1)), sg.Combo(values=[], key="-QUADRA_MAP_STAWKA-", readonly=True, size=(20, 1))],
+            [sg.Text("Części:", size=(15, 1)), sg.Combo(values=[], key="-QUADRA_MAP_CZESCI-", readonly=True, size=(20, 1))],
+            [sg.Button("Zastosuj mapowanie", key="-QUADRA_APPLY_MAPPING-"), sg.Button("Resetuj", key="-QUADRA_RESET_MAPPING-")],
+        ], key="-QUADRA_MAPPING_PANEL-", visible=False))],
         
         [sg.HorizontalSeparator()],
         
@@ -1344,6 +1362,82 @@ def main():
         elif event == "-QUADRA_ALL_SHEETS-":
             all_sheets_checked = values["-QUADRA_ALL_SHEETS-"]
             window["-QUADRA_SHEETS_DROPDOWN-"].update(disabled=all_sheets_checked)
+        
+        elif event == "-QUADRA_DBF_PATH-":
+            # When DBF file is selected, load field names and auto-populate mapping dropdowns
+            dbf_path = values["-QUADRA_DBF_PATH-"].strip()
+            if dbf_path and os.path.exists(dbf_path):
+                try:
+                    global quadra_dbf_field_names
+                    quadra_dbf_field_names = get_dbf_field_names(dbf_path)
+                    
+                    # Update mapping dropdowns with field names
+                    field_options = [''] + quadra_dbf_field_names  # Empty option for "not set"
+                    window["-QUADRA_MAP_NUMER-"].update(values=field_options, value='')
+                    window["-QUADRA_MAP_STAWKA-"].update(values=field_options, value='')
+                    window["-QUADRA_MAP_CZESCI-"].update(values=field_options, value='')
+                    
+                    # Auto-detect and set default values
+                    numer_field = detect_dbf_field_name(quadra_dbf_field_names, DBF_NUMER_FIELD_NAMES)
+                    stawka_field = detect_dbf_field_name(quadra_dbf_field_names, DBF_STAWKA_FIELD_NAMES)
+                    czesci_field = detect_dbf_field_name(quadra_dbf_field_names, DBF_CZESCI_FIELD_NAMES)
+                    
+                    if numer_field:
+                        window["-QUADRA_MAP_NUMER-"].update(value=numer_field)
+                    if stawka_field:
+                        window["-QUADRA_MAP_STAWKA-"].update(value=stawka_field)
+                    if czesci_field:
+                        window["-QUADRA_MAP_CZESCI-"].update(value=czesci_field)
+                    
+                    window["-STATUS_BAR-"].update(f"Załadowano plik DBF: {len(quadra_dbf_field_names)} pól wykrytych")
+                except Exception as e:
+                    window["-STATUS_BAR-"].update(f"Błąd odczytu pól DBF: {e}")
+        
+        elif event == "-QUADRA_CONFIG_MAPPING-":
+            # Toggle visibility of mapping panel
+            current_visible = window["-QUADRA_MAPPING_PANEL-"].metadata.get('visible', False) if hasattr(window["-QUADRA_MAPPING_PANEL-"], 'metadata') else False
+            new_visible = not current_visible
+            window["-QUADRA_MAPPING_PANEL-"].update(visible=new_visible)
+            if not hasattr(window["-QUADRA_MAPPING_PANEL-"], 'metadata'):
+                window["-QUADRA_MAPPING_PANEL-"].metadata = {}
+            window["-QUADRA_MAPPING_PANEL-"].metadata['visible'] = new_visible
+        
+        elif event == "-QUADRA_APPLY_MAPPING-":
+            # Apply user-configured mapping
+            global quadra_dbf_field_mapping
+            quadra_dbf_field_mapping = {}
+            
+            numer_field = values["-QUADRA_MAP_NUMER-"]
+            if numer_field:
+                quadra_dbf_field_mapping['numer_dbf'] = numer_field
+            
+            stawka_field = values["-QUADRA_MAP_STAWKA-"]
+            if stawka_field:
+                quadra_dbf_field_mapping['stawka'] = stawka_field
+            
+            czesci_field = values["-QUADRA_MAP_CZESCI-"]
+            if czesci_field:
+                quadra_dbf_field_mapping['czesci'] = czesci_field
+            
+            sg.popup(f"Mapowanie zastosowane:\n{quadra_dbf_field_mapping}", title="Mapowanie")
+            window["-STATUS_BAR-"].update("Mapowanie pól DBF zastosowane")
+        
+        elif event == "-QUADRA_RESET_MAPPING-":
+            # Reset to auto-detection
+            global quadra_dbf_field_mapping
+            quadra_dbf_field_mapping = {}
+            
+            # Re-detect and set default values if DBF is loaded
+            if quadra_dbf_field_names:
+                numer_field = detect_dbf_field_name(quadra_dbf_field_names, DBF_NUMER_FIELD_NAMES)
+                stawka_field = detect_dbf_field_name(quadra_dbf_field_names, DBF_STAWKA_FIELD_NAMES)
+                czesci_field = detect_dbf_field_name(quadra_dbf_field_names, DBF_CZESCI_FIELD_NAMES)
+                
+                window["-QUADRA_MAP_NUMER-"].update(value=numer_field or '')
+                window["-QUADRA_MAP_STAWKA-"].update(value=stawka_field or '')
+                window["-QUADRA_MAP_CZESCI-"].update(value=czesci_field or '')
+            
+            window["-STATUS_BAR-"].update("Mapowanie zresetowane do autodetekcji")
 
         elif event == "-QUADRA_CHECK_BTN-":
             # Validate inputs
@@ -1400,7 +1494,7 @@ def main():
             window["-STATUS_BAR-"].update(f"Sprawdzanie numerów z DBF w arkuszu {spreadsheet_name}...")
             
             # Start check thread
-            global quadra_check_thread
+            global quadra_check_thread, quadra_dbf_field_mapping
             quadra_check_thread = threading.Thread(
                 target=quadra_check_thread_func,
                 args=(
@@ -1410,7 +1504,8 @@ def main():
                     spreadsheet_id,
                     mode,
                     sheet_names,
-                    column_names
+                    column_names,
+                    quadra_dbf_field_mapping if quadra_dbf_field_mapping else None
                 ),
                 daemon=True
             )

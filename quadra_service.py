@@ -23,8 +23,9 @@ from sheets_search import (
 logger = logging.getLogger(__name__)
 
 # DBF field name mappings for automatic detection (case-insensitive)
-DBF_STAWKA_FIELD_NAMES = ['STAWKA', 'STAW', 'RATE', 'PRICE']
-DBF_CZESCI_FIELD_NAMES = ['CZESCI', 'PARTS']
+DBF_STAWKA_FIELD_NAMES = ['STAWKA', 'STAW', 'RATE', 'PRICE', 'CENA']
+DBF_CZESCI_FIELD_NAMES = ['CZESCI', 'PARTS', 'CZESC', 'PART']
+DBF_NUMER_FIELD_NAMES = ['NUMER', 'NUMBER', 'NR', 'ORDER', 'ZLECENIE']
 
 
 def column_letter_to_index(column: str) -> int:
@@ -118,32 +119,64 @@ def detect_dbf_field_name(field_names: List[str], possible_names: List[str]) -> 
     return None
 
 
-def map_dbf_record_to_result(record: Dict[str, Any], field_names: List[str]) -> Dict[str, Any]:
+def map_dbf_record_to_result(
+    record: Dict[str, Any], 
+    field_names: List[str],
+    mapping: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
     """
-    Map a DBF record to a result dictionary with detected fields.
+    Map a DBF record to a result dictionary with detected or user-specified fields.
     
     Detects and extracts:
-    - 'stawka' from field names: STAWKA, STAW, RATE, PRICE
-    - 'czesci' from field names: CZESCI, PARTS
+    - 'numer_dbf' from field names: NUMER, NUMBER, NR, ORDER, ZLECENIE
+    - 'stawka' from field names: STAWKA, STAW, RATE, PRICE, CENA
+    - 'czesci' from field names: CZESCI, PARTS, CZESC, PART
     
     Args:
         record: DBF record as dictionary
         field_names: List of all field names in the DBF table
+        mapping: Optional dict mapping app_field -> dbf_field_name
+                 e.g., {'stawka': 'RATE', 'czesci': 'PARTS', 'numer_dbf': 'ORDER'}
+                 If provided, overrides autodetection for specified fields
     
     Returns:
-        Dictionary with 'stawka' and 'czesci' keys (empty strings if not found)
+        Dictionary with 'numer_dbf', 'stawka' and 'czesci' keys (empty strings if not found)
     
     Examples:
         >>> record = {'NUMER': '12345', 'STAWKA': '150.00', 'CZESCI': 'ABC'}
         >>> field_names = ['NUMER', 'STAWKA', 'CZESCI']
         >>> map_dbf_record_to_result(record, field_names)
-        {'stawka': '150.00', 'czesci': 'ABC'}
+        {'numer_dbf': '12345', 'stawka': '150.00', 'czesci': 'ABC'}
+        
+        >>> # With custom mapping
+        >>> map_dbf_record_to_result(record, field_names, {'stawka': 'STAWKA', 'czesci': 'CZESCI'})
+        {'numer_dbf': '12345', 'stawka': '150.00', 'czesci': 'ABC'}
     """
-    # Detect field names using module-level constants
-    stawka_field = detect_dbf_field_name(field_names, DBF_STAWKA_FIELD_NAMES)
-    czesci_field = detect_dbf_field_name(field_names, DBF_CZESCI_FIELD_NAMES)
+    mapping = mapping or {}
+    
+    # Detect or use mapped field names
+    if 'numer_dbf' in mapping and mapping['numer_dbf'] in field_names:
+        numer_field = mapping['numer_dbf']
+    else:
+        numer_field = detect_dbf_field_name(field_names, DBF_NUMER_FIELD_NAMES)
+    
+    if 'stawka' in mapping and mapping['stawka'] in field_names:
+        stawka_field = mapping['stawka']
+    else:
+        stawka_field = detect_dbf_field_name(field_names, DBF_STAWKA_FIELD_NAMES)
+    
+    if 'czesci' in mapping and mapping['czesci'] in field_names:
+        czesci_field = mapping['czesci']
+    else:
+        czesci_field = detect_dbf_field_name(field_names, DBF_CZESCI_FIELD_NAMES)
     
     # Extract values
+    numer_value = ''
+    if numer_field and numer_field in record:
+        val = record[numer_field]
+        if val is not None:
+            numer_value = str(val).strip()
+    
     stawka_value = ''
     if stawka_field and stawka_field in record:
         val = record[stawka_field]
@@ -157,6 +190,7 @@ def map_dbf_record_to_result(record: Dict[str, Any], field_names: List[str]) -> 
             czesci_value = str(val).strip()
     
     return {
+        'numer_dbf': numer_value,
         'stawka': stawka_value,
         'czesci': czesci_value
     }
@@ -216,21 +250,57 @@ def read_dbf_column(dbf_path: str, column_identifier: Union[str, int] = 'B') -> 
     return values
 
 
-def read_dbf_records_with_extra_fields(dbf_path: str, column_identifier: Union[str, int] = 'B') -> List[Dict[str, Any]]:
+def get_dbf_field_names(dbf_path: str) -> List[str]:
     """
-    Read DBF records with main column value and additional fields (stawka, czesci).
+    Get list of field names from a DBF file.
+    
+    Args:
+        dbf_path: Path to the DBF file
+    
+    Returns:
+        List of field names in the DBF file
+    
+    Raises:
+        FileNotFoundError: If DBF file doesn't exist
+        ValueError: If there's an error reading the DBF file
+    
+    Example:
+        >>> field_names = get_dbf_field_names('orders.dbf')
+        >>> print(field_names)
+        ['NUMER', 'STAWKA', 'CZESCI', 'DATA']
+    """
+    from dbfread.exceptions import DBFNotFound
+    
+    try:
+        table = DBF(dbf_path, encoding='cp1250')  # Polish encoding
+        return table.field_names
+    except DBFNotFound as e:
+        raise FileNotFoundError(f"DBF file not found: {dbf_path}")
+    except Exception as e:
+        raise ValueError(f"Error opening DBF file: {e}")
+
+
+def read_dbf_records_with_extra_fields(
+    dbf_path: str, 
+    column_identifier: Union[str, int] = 'B',
+    mapping: Optional[Dict[str, str]] = None
+) -> List[Dict[str, Any]]:
+    """
+    Read DBF records with main column value and additional fields (numer_dbf, stawka, czesci).
     
     Args:
         dbf_path: Path to the DBF file
         column_identifier: Column to read main values from (default 'B')
+        mapping: Optional dict mapping app_field -> dbf_field_name
+                 e.g., {'stawka': 'RATE', 'czesci': 'PARTS', 'numer_dbf': 'ORDER'}
     
     Returns:
-        List of dictionaries with 'value', 'stawka', and 'czesci' keys
+        List of dictionaries with 'value', 'numer_dbf', 'stawka', and 'czesci' keys
         
     Example:
         >>> records = read_dbf_records_with_extra_fields('orders.dbf', 'B')
         >>> records[0]
-        {'value': '12345', 'stawka': '150.00', 'czesci': 'ABC'}
+        {'value': '12345', 'numer_dbf': '12345', 'stawka': '150.00', 'czesci': 'ABC'}
     
     Raises:
         FileNotFoundError: If DBF file doesn't exist
@@ -269,10 +339,11 @@ def read_dbf_records_with_extra_fields(dbf_path: str, column_identifier: Union[s
             continue  # Skip empty records
         
         # Map additional fields
-        extra_fields = map_dbf_record_to_result(record, field_names)
+        extra_fields = map_dbf_record_to_result(record, field_names, mapping)
         
         records.append({
             'value': main_value,
+            'numer_dbf': extra_fields['numer_dbf'],
             'stawka': extra_fields['stawka'],
             'czesci': extra_fields['czesci']
         })
@@ -558,7 +629,7 @@ def format_quadra_result_for_table(result: Dict[str, Any]) -> List[str]:
         result: Result dictionary from search_dbf_values_in_sheets
     
     Returns:
-        List of strings for table row: [Numer z DBF, Stawka, Status, Arkusz, Kolumna, Wiersz, Czesci_extra, Uwagi]
+        List of strings for table row: [Arkusz, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi]
     """
     status = "Found" if result['found'] else "Missing"
     sheet_name = result.get('sheetName', '') or ''
@@ -568,15 +639,16 @@ def format_quadra_result_for_table(result: Dict[str, Any]) -> List[str]:
     notes = result.get('notes', '') or ''
     stawka = result.get('stawka', '') or ''
     czesci = result.get('czesci', '') or ''
+    numer_dbf = str(result.get('dbfValue', ''))
     
     return [
-        str(result['dbfValue']),
-        stawka,
-        status,
         sheet_name,
+        numer_dbf,
+        stawka,
+        czesci,
+        status,
         column_name,
         row_display,
-        czesci,
         notes
     ]
 
@@ -655,7 +727,7 @@ def write_quadra_results_to_sheet(
     start_row: int = 1
 ) -> None:
     """
-    Write Quadra results to a Google Sheet with columns I (Stawka) and J (Czesci_extra).
+    Write Quadra results to a Google Sheet with columns I (Stawka) and J (Czesci).
     
     Creates columns I and J if they don't exist, sets headers, and writes data.
     
@@ -673,7 +745,7 @@ def write_quadra_results_to_sheet(
     
     Note:
         - Column I (index 8): Stawka
-        - Column J (index 9): Czesci_extra
+        - Column J (index 9): Czesci
         - Preserves existing data in other columns
     """
     if not results:
@@ -702,11 +774,11 @@ def write_quadra_results_to_sheet(
     
     # Prepare data for columns I and J
     # Column I (index 8): Stawka
-    # Column J (index 9): Czesci_extra
+    # Column J (index 9): Czesci
     
     # Build values array: [[header_I, header_J], [row1_I, row1_J], [row2_I, row2_J], ...]
     values = [
-        ['Stawka', 'Czesci_extra']  # Header row
+        ['Stawka', 'Czesci']  # Header row
     ]
     
     for result in results:
