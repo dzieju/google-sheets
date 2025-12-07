@@ -77,7 +77,7 @@ def parse_column_identifier(column_id: Union[str, int]) -> int:
     # If all else fails, try letter conversion
     try:
         return column_letter_to_index(column_str)
-    except:
+    except Exception:
         # Default to column 0
         return 0
 

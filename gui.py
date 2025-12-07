@@ -712,7 +712,12 @@ def create_layout():
     tab_settings = sg.Tab("Ustawienia", create_settings_tab())
 
     layout = [
-        [sg.TabGroup([[tab_auth, tab_files, tab_search, tab_single_sheet, tab_quadra, tab_settings]], key="-TABGROUP-", expand_x=True, expand_y=True)],
+        [sg.TabGroup(
+            [[tab_auth, tab_files, tab_search, tab_single_sheet, tab_quadra, tab_settings]], 
+            key="-TABGROUP-", 
+            expand_x=True, 
+            expand_y=True
+        )],
         [sg.StatusBar("Gotowe", key="-STATUS_BAR-", size=(60, 1))],
     ]
     return layout
