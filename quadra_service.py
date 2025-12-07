@@ -82,6 +82,87 @@ def parse_column_identifier(column_id: Union[str, int]) -> int:
         return 0
 
 
+def detect_dbf_field_name(field_names: List[str], possible_names: List[str]) -> Optional[str]:
+    """
+    Detect field name from a list of possible alternatives (case-insensitive).
+    
+    Args:
+        field_names: List of field names in DBF table
+        possible_names: List of possible field names to match
+    
+    Returns:
+        First matching field name (original case) or None if not found
+    
+    Examples:
+        >>> detect_dbf_field_name(['NUMER', 'STAWKA', 'DATA'], ['STAWKA', 'STAW', 'RATE'])
+        'STAWKA'
+        >>> detect_dbf_field_name(['NUMER', 'RATE', 'DATA'], ['STAWKA', 'STAW', 'RATE'])
+        'RATE'
+    """
+    if not field_names or not possible_names:
+        return None
+    
+    # Normalize field names for comparison (uppercase, trim)
+    normalized_fields = {name.upper().strip(): name for name in field_names}
+    
+    # Check each possible name
+    for possible in possible_names:
+        normalized_possible = possible.upper().strip()
+        if normalized_possible in normalized_fields:
+            return normalized_fields[normalized_possible]
+    
+    return None
+
+
+def map_dbf_record_to_result(record: Dict[str, Any], field_names: List[str]) -> Dict[str, Any]:
+    """
+    Map a DBF record to a result dictionary with detected fields.
+    
+    Detects and extracts:
+    - 'stawka' from field names: STAWKA, STAW, RATE, PRICE
+    - 'czesci' from field names: CZESCI, PARTS
+    
+    Args:
+        record: DBF record as dictionary
+        field_names: List of all field names in the DBF table
+    
+    Returns:
+        Dictionary with 'stawka' and 'czesci' keys (empty strings if not found)
+    
+    Examples:
+        >>> record = {'NUMER': '12345', 'STAWKA': '150.00', 'CZESCI': 'ABC'}
+        >>> field_names = ['NUMER', 'STAWKA', 'CZESCI']
+        >>> map_dbf_record_to_result(record, field_names)
+        {'stawka': '150.00', 'czesci': 'ABC'}
+    """
+    # Possible field names for stawka (rate/price)
+    stawka_names = ['STAWKA', 'STAW', 'RATE', 'PRICE']
+    # Possible field names for czesci (parts)
+    czesci_names = ['CZESCI', 'PARTS']
+    
+    # Detect field names
+    stawka_field = detect_dbf_field_name(field_names, stawka_names)
+    czesci_field = detect_dbf_field_name(field_names, czesci_names)
+    
+    # Extract values
+    stawka_value = ''
+    if stawka_field and stawka_field in record:
+        val = record[stawka_field]
+        if val is not None:
+            stawka_value = str(val).strip()
+    
+    czesci_value = ''
+    if czesci_field and czesci_field in record:
+        val = record[czesci_field]
+        if val is not None:
+            czesci_value = str(val).strip()
+    
+    return {
+        'stawka': stawka_value,
+        'czesci': czesci_value
+    }
+
+
 def read_dbf_column(dbf_path: str, column_identifier: Union[str, int] = 'B') -> List[Any]:
     """
     Read values from a specific column in a DBF file.
@@ -134,6 +215,71 @@ def read_dbf_column(dbf_path: str, column_identifier: Union[str, int] = 'B') -> 
     
     logger.info(f"Read {len(values)} non-empty values from DBF column '{field_name}'")
     return values
+
+
+def read_dbf_records_with_extra_fields(dbf_path: str, column_identifier: Union[str, int] = 'B') -> List[Dict[str, Any]]:
+    """
+    Read DBF records with main column value and additional fields (stawka, czesci).
+    
+    Args:
+        dbf_path: Path to the DBF file
+        column_identifier: Column to read main values from (default 'B')
+    
+    Returns:
+        List of dictionaries with 'value', 'stawka', and 'czesci' keys
+        
+    Example:
+        >>> records = read_dbf_records_with_extra_fields('orders.dbf', 'B')
+        >>> records[0]
+        {'value': '12345', 'stawka': '150.00', 'czesci': 'ABC'}
+    
+    Raises:
+        FileNotFoundError: If DBF file doesn't exist
+        ValueError: If column identifier is invalid or column doesn't exist
+    """
+    from dbfread.exceptions import DBFNotFound
+    
+    try:
+        table = DBF(dbf_path, encoding='cp1250')  # Polish encoding
+    except DBFNotFound as e:
+        raise FileNotFoundError(f"DBF file not found: {dbf_path}")
+    except Exception as e:
+        raise ValueError(f"Error opening DBF file: {e}")
+    
+    # Get column index for main value
+    col_index = parse_column_identifier(column_identifier)
+    
+    # Get field names
+    field_names = table.field_names
+    
+    if col_index < 0 or col_index >= len(field_names):
+        raise ValueError(
+            f"Column index {col_index} (from '{column_identifier}') is out of range. "
+            f"DBF has {len(field_names)} columns: {', '.join(field_names)}"
+        )
+    
+    main_field_name = field_names[col_index]
+    logger.info(f"Reading records from DBF, main column: '{main_field_name}' (index {col_index})")
+    
+    # Read all records
+    records = []
+    for record in table:
+        # Get main value
+        main_value = record.get(main_field_name)
+        if main_value is None or not str(main_value).strip():
+            continue  # Skip empty records
+        
+        # Map additional fields
+        extra_fields = map_dbf_record_to_result(record, field_names)
+        
+        records.append({
+            'value': main_value,
+            'stawka': extra_fields['stawka'],
+            'czesci': extra_fields['czesci']
+        })
+    
+    logger.info(f"Read {len(records)} records from DBF with extra fields")
+    return records
 
 
 def normalize_value_for_comparison(value: Any, mode: str = 'exact') -> str:
@@ -266,7 +412,7 @@ def search_value_in_sheet_data(
 def search_dbf_values_in_sheets(
     drive_service,
     sheets_service,
-    dbf_values: List[Any],
+    dbf_values: Union[List[Any], List[Dict[str, Any]]],
     spreadsheet_id: str,
     mode: str = 'exact',
     sheet_names: Optional[List[str]] = None,
@@ -279,7 +425,7 @@ def search_dbf_values_in_sheets(
     Args:
         drive_service: Google Drive service instance
         sheets_service: Google Sheets service instance
-        dbf_values: List of values from DBF to search for
+        dbf_values: List of values or dicts with {'value', 'stawka', 'czesci'} from DBF to search for
         spreadsheet_id: ID of the spreadsheet to search in
         mode: Comparison mode - 'exact' or 'substring'
         sheet_names: Optional list of sheet names to search (None = all sheets)
@@ -296,7 +442,9 @@ def search_dbf_values_in_sheets(
             'columnName': str or None,
             'rowIndex': int or None,
             'matchedValue': Any or None,
-            'notes': str
+            'notes': str,
+            'stawka': str (from DBF record),
+            'czesci': str (from DBF record)
         }
     """
     # Get spreadsheet metadata
@@ -340,7 +488,17 @@ def search_dbf_values_in_sheets(
     
     # Search each DBF value
     results = []
-    for dbf_value in dbf_values:
+    for dbf_item in dbf_values:
+        # Handle both simple values and record dicts
+        if isinstance(dbf_item, dict):
+            dbf_value = dbf_item.get('value')
+            stawka = dbf_item.get('stawka', '')
+            czesci = dbf_item.get('czesci', '')
+        else:
+            dbf_value = dbf_item
+            stawka = ''
+            czesci = ''
+        
         found = False
         match_info = None
         
@@ -369,7 +527,9 @@ def search_dbf_values_in_sheets(
                 'columnName': match_info['columnName'],
                 'rowIndex': match_info['rowIndex'],
                 'matchedValue': match_info['value'],
-                'notes': f"Found in {match_info['sheetName']} at {col_index_to_a1(match_info['columnIndex'])}{match_info['rowIndex'] + 1}"
+                'notes': f"Found in {match_info['sheetName']} at {col_index_to_a1(match_info['columnIndex'])}{match_info['rowIndex'] + 1}",
+                'stawka': stawka,
+                'czesci': czesci
             }
         else:
             result = {
@@ -380,7 +540,9 @@ def search_dbf_values_in_sheets(
                 'columnName': None,
                 'rowIndex': None,
                 'matchedValue': None,
-                'notes': 'Missing'
+                'notes': 'Missing',
+                'stawka': stawka,
+                'czesci': czesci
             }
         
         results.append(result)
@@ -397,7 +559,7 @@ def format_quadra_result_for_table(result: Dict[str, Any]) -> List[str]:
         result: Result dictionary from search_dbf_values_in_sheets
     
     Returns:
-        List of strings for table row: [DBF_value, Status, SheetName, Column, Row, Notes]
+        List of strings for table row: [Numer z DBF, Stawka, Status, Arkusz, Kolumna, Wiersz, Czesci_extra, Uwagi]
     """
     status = "Found" if result['found'] else "Missing"
     sheet_name = result.get('sheetName', '') or ''
@@ -405,13 +567,17 @@ def format_quadra_result_for_table(result: Dict[str, Any]) -> List[str]:
     row_index = result.get('rowIndex')
     row_display = str(row_index + 1) if row_index is not None else ''
     notes = result.get('notes', '') or ''
+    stawka = result.get('stawka', '') or ''
+    czesci = result.get('czesci', '') or ''
     
     return [
         str(result['dbfValue']),
+        stawka,
         status,
         sheet_name,
         column_name,
         row_display,
+        czesci,
         notes
     ]
 
@@ -430,12 +596,14 @@ def export_quadra_results_to_json(results: List[Dict[str, Any]]) -> List[Dict[st
     for result in results:
         export_obj = {
             'dbfValue': str(result['dbfValue']),
+            'stawka': result.get('stawka', ''),
             'status': 'Found' if result['found'] else 'Missing',
             'sheetName': result.get('sheetName', ''),
             'columnName': result.get('columnName', ''),
             'columnIndex': result.get('columnIndex'),
             'rowIndex': result.get('rowIndex'),
             'matchedValue': str(result.get('matchedValue', '')) if result.get('matchedValue') is not None else '',
+            'czesci': result.get('czesci', ''),
             'notes': result.get('notes', '')
         }
         export_list.append(export_obj)
@@ -460,19 +628,114 @@ def export_quadra_results_to_csv(results: List[Dict[str, Any]]) -> str:
     writer = csv.writer(output)
     
     # Write header
-    writer.writerow(['DBF_Value', 'Status', 'SheetName', 'ColumnName', 'ColumnIndex', 'RowIndex', 'MatchedValue', 'Notes'])
+    writer.writerow(['DBF_Value', 'Stawka', 'Status', 'SheetName', 'ColumnName', 'ColumnIndex', 'RowIndex', 'MatchedValue', 'Czesci', 'Notes'])
     
     # Write data
     for result in results:
         writer.writerow([
             str(result['dbfValue']),
+            result.get('stawka', ''),
             'Found' if result['found'] else 'Missing',
             result.get('sheetName', ''),
             result.get('columnName', ''),
             result.get('columnIndex', ''),
             result.get('rowIndex', ''),
             str(result.get('matchedValue', '')) if result.get('matchedValue') is not None else '',
+            result.get('czesci', ''),
             result.get('notes', '')
         ])
     
     return output.getvalue()
+
+
+def write_quadra_results_to_sheet(
+    sheets_service,
+    spreadsheet_id: str,
+    sheet_name: str,
+    results: List[Dict[str, Any]],
+    start_row: int = 1
+) -> None:
+    """
+    Write Quadra results to a Google Sheet with columns I (Stawka) and J (Czesci_extra).
+    
+    Creates columns I and J if they don't exist, sets headers, and writes data.
+    
+    Args:
+        sheets_service: Google Sheets service instance
+        spreadsheet_id: ID of the spreadsheet
+        sheet_name: Name of the sheet tab
+        results: List of result dictionaries from search_dbf_values_in_sheets
+        start_row: Row number to start writing data (1-based, default=1 for header row)
+    
+    Example:
+        >>> write_quadra_results_to_sheet(
+        ...     sheets_service, 'spreadsheet_id', 'Sheet1', results, start_row=1
+        ... )
+    
+    Note:
+        - Column I (index 8): Stawka
+        - Column J (index 9): Czesci_extra
+        - Preserves existing data in other columns
+    """
+    if not results:
+        logger.warning("No results to write to sheet")
+        return
+    
+    # Get sheet ID
+    try:
+        metadata = sheets_service.spreadsheets().get(
+            spreadsheetId=spreadsheet_id,
+            fields='sheets(properties(sheetId,title))'
+        ).execute()
+        
+        sheet_id = None
+        for sheet in metadata.get('sheets', []):
+            if sheet['properties']['title'] == sheet_name:
+                sheet_id = sheet['properties']['sheetId']
+                break
+        
+        if sheet_id is None:
+            raise ValueError(f"Sheet '{sheet_name}' not found in spreadsheet")
+            
+    except Exception as e:
+        logger.error(f"Error getting sheet metadata: {e}")
+        raise
+    
+    # Prepare data for columns I and J
+    # Column I (index 8): Stawka
+    # Column J (index 9): Czesci_extra
+    
+    # Build values array: [[header_I, header_J], [row1_I, row1_J], [row2_I, row2_J], ...]
+    values = [
+        ['Stawka', 'Czesci_extra']  # Header row
+    ]
+    
+    for result in results:
+        stawka = result.get('stawka', '') or ''
+        czesci = result.get('czesci', '') or ''
+        values.append([stawka, czesci])
+    
+    # Write to columns I and J starting at start_row
+    # A1 notation: I{start_row}:J{start_row + len(results)}
+    range_notation = f"{sheet_name}!I{start_row}:J{start_row + len(results)}"
+    
+    try:
+        body = {
+            'values': values
+        }
+        
+        result = sheets_service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=range_notation,
+            valueInputOption='RAW',
+            body=body
+        ).execute()
+        
+        logger.info(
+            f"Wrote {result.get('updatedCells', 0)} cells to {range_notation} "
+            f"in sheet '{sheet_name}'"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error writing results to sheet: {e}")
+        raise
