@@ -24,6 +24,8 @@ from sheets_search import (
     ALL_COLUMNS_VALUES,
     parse_ignore_patterns,
     parse_header_rows,
+    get_sheet_headers_with_indices,
+    get_sheet_data,
 )
 from quadra_service import (
     read_dbf_column,
@@ -729,6 +731,26 @@ def create_quadra_tab():
         
         [sg.HorizontalSeparator()],
         
+        # Multi-column preview section
+        [sg.Text("Podgląd wybranych kolumn:", font=("Helvetica", 10, "bold"))],
+        [sg.Text("Wybierz kolumny do podglądu:")],
+        [sg.Listbox(values=[], key="-QUADRA_COLUMN_SELECT-", select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE, 
+                    size=(40, 6), enable_events=False, expand_x=True)],
+        [sg.Button("Zastosuj podgląd", key="-QUADRA_APPLY_PREVIEW-", size=(15, 1))],
+        [sg.Table(
+            values=[],
+            headings=[],
+            key="-QUADRA_PREVIEW_TABLE-",
+            auto_size_columns=True,
+            justification='left',
+            num_rows=10,
+            expand_x=True,
+            enable_events=False,
+            vertical_scroll_only=False,
+        )],
+        
+        [sg.HorizontalSeparator()],
+        
         # Action buttons
         [sg.Button("Sprawdź", key="-QUADRA_CHECK_BTN-", size=(15, 1)),
          sg.Button("Zatrzymaj", key="-QUADRA_STOP_BTN-", disabled=True, size=(15, 1))],
@@ -1404,10 +1426,44 @@ def main():
             sheets_list = data["sheets"]
             window["-QUADRA_SHEETS_DROPDOWN-"].update(values=sheets_list, value=sheets_list[0] if len(sheets_list) > 0 else "")
             window["-STATUS_BAR-"].update(f"Załadowano {len(sheets_list)} zakładek z: {data['name']}")
+            # Also load columns for the first sheet if available
+            if sheets_service and sheets_list:
+                try:
+                    selected = values["-QUADRA_SPREADSHEET_DROPDOWN-"]
+                    if selected:
+                        combo_values = window["-QUADRA_SPREADSHEET_DROPDOWN-"].Values
+                        idx = combo_values.index(selected)
+                        file_info = quadra_current_spreadsheets[idx]
+                        spreadsheet_id = file_info["id"]
+                        sheet_name = sheets_list[0]
+                        headers = get_sheet_headers_with_indices(sheets_service, spreadsheet_id, sheet_name)
+                        column_display = [f"{h['name']} (kolumna {h['index']})" for h in headers]
+                        window["-QUADRA_COLUMN_SELECT-"].update(values=column_display)
+                except Exception as e:
+                    logger.error(f"Error loading columns: {e}")
 
         elif event == "-QUADRA_ALL_SHEETS-":
             all_sheets_checked = values["-QUADRA_ALL_SHEETS-"]
             window["-QUADRA_SHEETS_DROPDOWN-"].update(disabled=all_sheets_checked)
+        
+        elif event == "-QUADRA_SHEETS_DROPDOWN-":
+            # When a sheet is selected, load its columns
+            if sheets_service:
+                try:
+                    selected_spreadsheet = values["-QUADRA_SPREADSHEET_DROPDOWN-"]
+                    selected_sheet = values["-QUADRA_SHEETS_DROPDOWN-"]
+                    if selected_spreadsheet and selected_sheet:
+                        combo_values = window["-QUADRA_SPREADSHEET_DROPDOWN-"].Values
+                        idx = combo_values.index(selected_spreadsheet)
+                        file_info = quadra_current_spreadsheets[idx]
+                        spreadsheet_id = file_info["id"]
+                        headers = get_sheet_headers_with_indices(sheets_service, spreadsheet_id, selected_sheet)
+                        column_display = [f"{h['name']} (kolumna {h['index']})" for h in headers]
+                        window["-QUADRA_COLUMN_SELECT-"].update(values=column_display)
+                        window["-STATUS_BAR-"].update(f"Załadowano {len(headers)} kolumn")
+                except Exception as e:
+                    logger.error(f"Error loading columns: {e}")
+                    window["-STATUS_BAR-"].update(f"Błąd ładowania kolumn")
         
         elif event == "-QUADRA_DBF_PATH-":
             # When DBF file is selected, load field names and auto-populate mapping dropdowns
@@ -1649,6 +1705,89 @@ def main():
                 if not hasattr(window, 'metadata') or window.metadata is None:
                     window.metadata = {}
                 window.metadata['quadra_results'] = results
+
+        elif event == "-QUADRA_APPLY_PREVIEW-":
+            # Apply preview of selected columns
+            if not sheets_service:
+                sg.popup("Brak autoryzacji. Zaloguj się najpierw w zakładce Autoryzacja.", title="Błąd")
+                continue
+            
+            try:
+                selected_spreadsheet = values["-QUADRA_SPREADSHEET_DROPDOWN-"]
+                selected_sheet = values["-QUADRA_SHEETS_DROPDOWN-"]
+                selected_columns = values["-QUADRA_COLUMN_SELECT-"]
+                
+                if not selected_spreadsheet:
+                    sg.popup("Wybierz arkusz kalkulacyjny.", title="Błąd")
+                    continue
+                
+                if not selected_sheet:
+                    sg.popup("Wybierz zakładkę.", title="Błąd")
+                    continue
+                    
+                if not selected_columns:
+                    sg.popup("Wybierz co najmniej jedną kolumnę.", title="Błąd")
+                    continue
+                
+                # Get spreadsheet ID
+                combo_values = window["-QUADRA_SPREADSHEET_DROPDOWN-"].Values
+                idx = combo_values.index(selected_spreadsheet)
+                file_info = quadra_current_spreadsheets[idx]
+                spreadsheet_id = file_info["id"]
+                
+                window["-STATUS_BAR-"].update("Ładowanie danych arkusza...")
+                
+                # Get all data and headers
+                all_data = get_sheet_data(sheets_service, spreadsheet_id, selected_sheet)
+                headers_info = get_sheet_headers_with_indices(sheets_service, spreadsheet_id, selected_sheet)
+                
+                if not all_data:
+                    sg.popup("Brak danych w arkuszu.", title="Informacja")
+                    continue
+                
+                # Parse selected column indices from display format "Name (kolumna N)"
+                selected_indices = []
+                for col_display in selected_columns:
+                    # Extract index from format "Name (kolumna N)"
+                    match = re.search(r'\(kolumna (\d+)\)', col_display)
+                    if match:
+                        selected_indices.append(int(match.group(1)) - 1)  # Convert to 0-based
+                
+                if not selected_indices:
+                    sg.popup("Nie można odczytać indeksów kolumn.", title="Błąd")
+                    continue
+                
+                # Filter data to show only selected columns
+                filtered_data = []
+                for row in all_data:
+                    filtered_row = []
+                    for idx in selected_indices:
+                        if idx < len(row):
+                            # Handle None values and convert to string
+                            cell_value = row[idx]
+                            if cell_value is None:
+                                cell_value = ""
+                            else:
+                                cell_value = str(cell_value)
+                            # Truncate long values for display
+                            if len(cell_value) > 100:
+                                cell_value = cell_value[:97] + "..."
+                            filtered_row.append(cell_value)
+                        else:
+                            filtered_row.append("")
+                    filtered_data.append(filtered_row)
+                
+                # Update preview table
+                # Note: PySimpleGUI Table doesn't support dynamic headers well, so we include headers as first row
+                if filtered_data:
+                    window["-QUADRA_PREVIEW_TABLE-"].update(values=filtered_data)
+                
+                window["-STATUS_BAR-"].update(f"Podgląd {len(filtered_data)} wierszy w {len(selected_indices)} kolumnach")
+                
+            except Exception as e:
+                logger.error(f"Error applying preview: {e}", exc_info=True)
+                sg.popup(f"Błąd podczas tworzenia podglądu: {e}", title="Błąd")
+                window["-STATUS_BAR-"].update("Błąd podczas podglądu")
 
         elif event == "-QUADRA_CLEAR_RESULTS-":
             window["-QUADRA_RESULTS_TABLE-"].update(values=[])
