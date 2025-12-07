@@ -1,6 +1,11 @@
 """
 test_quadra_service.py
 Unit tests for quadra_service module.
+
+Test Dependencies:
+- dbf (python-dbf): Used to CREATE test DBF files
+  Install with: pip install dbf
+  Note: Production code uses 'dbfread' for reading, which is lighter and read-only.
 """
 
 import unittest
@@ -274,7 +279,14 @@ class TestResultFormatting(unittest.TestCase):
 
 
 class TestDBFReading(unittest.TestCase):
-    """Tests for DBF reading functions."""
+    """Tests for DBF reading functions.
+    
+    Note: These tests use the 'dbf' library (python-dbf) to CREATE test DBF files,
+    while the production code uses 'dbfread' to READ them. This is intentional:
+    - dbfread: Fast, read-only, no dependencies - perfect for production
+    - dbf: Can write DBF files - needed for creating test fixtures
+    Both libraries are compatible with the same DBF file format.
+    """
     
     def setUp(self):
         """Create a temporary DBF file for testing."""
