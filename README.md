@@ -81,6 +81,12 @@ json_data = export_quadra_results_to_json(results, column_names=column_names)
 - W przypadku słownika, nie zmapowane kolumny zachowują oryginalne nazwy
 - Bez parametru `column_names` używane są domyślne nazwy (zachowana kompatybilność wsteczna)
 
+**Przykład:**
+Zobacz plik `example_column_names.py` dla kompletnych przykładów użycia tej funkcji:
+```bash
+python example_column_names.py
+```
+
 ## Funkcjonalności wyszukiwania
 
 ### Wyszukiwanie w wielu kolumnach o tej samej nazwie
