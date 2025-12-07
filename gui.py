@@ -40,6 +40,11 @@ from quadra_service import (
 )
 
 
+# -------------------- Constants --------------------
+# Maximum number of missing values to show in the preview popup
+MAX_PREVIEW_VALUES = 200
+
+
 # -------------------- Events --------------------
 EVENT_AUTH_DONE = "-AUTH_DONE-"
 EVENT_FILES_LOADED = "-FILES_LOADED-"
@@ -581,11 +586,12 @@ def quadra_find_missing_thread_func(window, dbf_path, dbf_column, spreadsheet_id
         
         # Read DBF column values
         try:
-            # Try to use read_dbf_column first
+            # Try to use read_dbf_column first, fall back to read_dbf_records_with_extra_fields
+            # This allows flexibility in reading different DBF formats
             try:
                 dbf_values = read_dbf_column(dbf_path, dbf_column)
             except (FileNotFoundError, ValueError) as e:
-                # Fallback to read_dbf_records_with_extra_fields
+                # First method failed, try alternative reading method
                 dbf_records = read_dbf_records_with_extra_fields(dbf_path, dbf_column)
                 dbf_values = [rec['value'] for rec in dbf_records if rec.get('value')]
             
@@ -1701,6 +1707,9 @@ def main():
                 continue
             
             # Check if a single sheet is selected (not "Wszystkie zakładki")
+            # Note: Multiple sheet support is intentionally not implemented in this version
+            # to keep the initial implementation simple. Future versions could iterate through
+            # all sheets and aggregate results.
             all_sheets = values["-QUADRA_ALL_SHEETS-"]
             if all_sheets:
                 sg.popup_error("Proszę wybrać pojedynczą zakładkę (odznacz 'Wszystkie zakładki').")
@@ -1755,8 +1764,8 @@ def main():
                 total_dbf = results.get('total_dbf_values', 0)
                 missing_values = results.get('missing_values', [])
                 
-                # Show first 200 values in popup
-                preview_count = min(200, len(missing_values))
+                # Show first MAX_PREVIEW_VALUES in popup
+                preview_count = min(MAX_PREVIEW_VALUES, len(missing_values))
                 preview_values = missing_values[:preview_count]
                 
                 popup_message = f"Analiza zakończona:\n\n"
@@ -1797,7 +1806,7 @@ def main():
                 window["-QUADRA_STATUS-"].update(f"Znaleziono: {found_count} | Brakujących: {missing_count}")
                 window["-STATUS_BAR-"].update(f"Sprawdzanie zakończone. Znaleziono: {found_count}, brakujących: {missing_count}")
                 
-                # Store results for export
+                # Store results for export (overwrites previous results)
                 window.metadata['quadra_results'] = results
 
         elif event == "-QUADRA_CLEAR_RESULTS-":
