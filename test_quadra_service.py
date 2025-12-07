@@ -206,15 +206,15 @@ class TestResultFormatting(unittest.TestCase):
         
         table_row = format_quadra_result_for_table(result)
         
-        # New format: [Numer z DBF, Stawka, Status, Arkusz, Kolumna, Wiersz, Czesci_extra, Uwagi]
-        self.assertEqual(table_row[0], '12345')  # DBF value
-        self.assertEqual(table_row[1], '')  # Stawka
-        self.assertEqual(table_row[2], 'Found')  # Status
-        self.assertEqual(table_row[3], 'Sheet1')  # Sheet name
-        self.assertEqual(table_row[4], 'Order')  # Column name
-        self.assertEqual(table_row[5], '6')  # Row (1-based)
-        self.assertEqual(table_row[6], '')  # Czesci_extra
-        self.assertEqual(table_row[7], 'Found in Sheet1 at B6')  # Notes
+        # New format: [Arkusz, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi]
+        self.assertEqual(table_row[0], 'Sheet1')  # Arkusz (Sheet name)
+        self.assertEqual(table_row[1], '12345')  # Numer z DBF (DBF value)
+        self.assertEqual(table_row[2], '')  # Stawka
+        self.assertEqual(table_row[3], '')  # Czesci
+        self.assertEqual(table_row[4], 'Found')  # Status
+        self.assertEqual(table_row[5], 'Order')  # Kolumna (Column name)
+        self.assertEqual(table_row[6], '6')  # Wiersz (Row, 1-based)
+        self.assertEqual(table_row[7], 'Found in Sheet1 at B6')  # Uwagi (Notes)
     
     def test_format_quadra_result_for_table_missing(self):
         """Test formatting a missing result for table display."""
@@ -231,15 +231,15 @@ class TestResultFormatting(unittest.TestCase):
         
         table_row = format_quadra_result_for_table(result)
         
-        # New format: [Numer z DBF, Stawka, Status, Arkusz, Kolumna, Wiersz, Czesci_extra, Uwagi]
-        self.assertEqual(table_row[0], '99999')  # DBF value
-        self.assertEqual(table_row[1], '')  # Stawka
-        self.assertEqual(table_row[2], 'Missing')  # Status
-        self.assertEqual(table_row[3], '')  # Sheet name
-        self.assertEqual(table_row[4], '')  # Column name
-        self.assertEqual(table_row[5], '')  # Row
-        self.assertEqual(table_row[6], '')  # Czesci_extra
-        self.assertEqual(table_row[7], 'Missing')  # Notes
+        # New format: [Arkusz, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi]
+        self.assertEqual(table_row[0], '')  # Arkusz (Sheet name)
+        self.assertEqual(table_row[1], '99999')  # Numer z DBF (DBF value)
+        self.assertEqual(table_row[2], '')  # Stawka
+        self.assertEqual(table_row[3], '')  # Czesci
+        self.assertEqual(table_row[4], 'Missing')  # Status
+        self.assertEqual(table_row[5], '')  # Kolumna (Column name)
+        self.assertEqual(table_row[6], '')  # Wiersz (Row)
+        self.assertEqual(table_row[7], 'Missing')  # Uwagi (Notes)
     
     def test_export_quadra_results_to_json(self):
         """Test JSON export formatting."""
@@ -403,7 +403,7 @@ class TestMapDBFRecord(unittest.TestCase):
     """Tests for mapping DBF records to results."""
     
     def test_map_dbf_record_with_all_fields(self):
-        """Test mapping record with both stawka and czesci fields."""
+        """Test mapping record with numer_dbf, stawka and czesci fields."""
         record = {
             'NUMER': '12345',
             'STAWKA': '150.00',
@@ -414,20 +414,22 @@ class TestMapDBFRecord(unittest.TestCase):
         
         result = map_dbf_record_to_result(record, field_names)
         
+        self.assertEqual(result['numer_dbf'], '12345')
         self.assertEqual(result['stawka'], '150.00')
         self.assertEqual(result['czesci'], 'ABC')
     
     def test_map_dbf_record_with_alternative_names(self):
         """Test mapping record with alternative field names."""
         record = {
-            'NUMER': '12345',
+            'ORDER': '12345',
             'RATE': '150.00',
             'PARTS': 'ABC'
         }
-        field_names = ['NUMER', 'RATE', 'PARTS']
+        field_names = ['ORDER', 'RATE', 'PARTS']
         
         result = map_dbf_record_to_result(record, field_names)
         
+        self.assertEqual(result['numer_dbf'], '12345')
         self.assertEqual(result['stawka'], '150.00')
         self.assertEqual(result['czesci'], 'ABC')
     
@@ -441,6 +443,7 @@ class TestMapDBFRecord(unittest.TestCase):
         
         result = map_dbf_record_to_result(record, field_names)
         
+        self.assertEqual(result['numer_dbf'], '12345')
         self.assertEqual(result['stawka'], '')
         self.assertEqual(result['czesci'], '')
     
@@ -455,8 +458,82 @@ class TestMapDBFRecord(unittest.TestCase):
         
         result = map_dbf_record_to_result(record, field_names)
         
+        self.assertEqual(result['numer_dbf'], '12345')
         self.assertEqual(result['stawka'], '')
         self.assertEqual(result['czesci'], '')
+    
+    def test_map_dbf_record_with_user_mapping(self):
+        """Test mapping record with user-provided mapping."""
+        record = {
+            'ORDER_NUM': '12345',
+            'PRICE': '150.00',
+            'COMPONENTS': 'ABC',
+            'DATA': '2025-01-01'
+        }
+        field_names = ['ORDER_NUM', 'PRICE', 'COMPONENTS', 'DATA']
+        
+        # User-provided mapping
+        mapping = {
+            'numer_dbf': 'ORDER_NUM',
+            'stawka': 'PRICE',
+            'czesci': 'COMPONENTS'
+        }
+        
+        result = map_dbf_record_to_result(record, field_names, mapping)
+        
+        self.assertEqual(result['numer_dbf'], '12345')
+        self.assertEqual(result['stawka'], '150.00')
+        self.assertEqual(result['czesci'], 'ABC')
+    
+    def test_map_dbf_record_with_partial_mapping(self):
+        """Test mapping record with partial user mapping (some fields auto-detected)."""
+        record = {
+            'ORDER_NUM': '12345',
+            'STAWKA': '150.00',
+            'CZESCI': 'ABC'
+        }
+        field_names = ['ORDER_NUM', 'STAWKA', 'CZESCI']
+        
+        # User only maps numer_dbf, others auto-detected
+        mapping = {
+            'numer_dbf': 'ORDER_NUM'
+        }
+        
+        result = map_dbf_record_to_result(record, field_names, mapping)
+        
+        self.assertEqual(result['numer_dbf'], '12345')
+        self.assertEqual(result['stawka'], '150.00')
+        self.assertEqual(result['czesci'], 'ABC')
+    
+    def test_map_dbf_record_with_cena_alternative(self):
+        """Test mapping record with CENA as alternative for stawka."""
+        record = {
+            'NUMER': '12345',
+            'CENA': '150.00',
+            'CZESCI': 'ABC'
+        }
+        field_names = ['NUMER', 'CENA', 'CZESCI']
+        
+        result = map_dbf_record_to_result(record, field_names)
+        
+        self.assertEqual(result['numer_dbf'], '12345')
+        self.assertEqual(result['stawka'], '150.00')
+        self.assertEqual(result['czesci'], 'ABC')
+    
+    def test_map_dbf_record_with_czesc_alternative(self):
+        """Test mapping record with CZESC/PART as alternative for czesci."""
+        record = {
+            'NUMER': '12345',
+            'STAWKA': '150.00',
+            'PART': 'ABC'
+        }
+        field_names = ['NUMER', 'STAWKA', 'PART']
+        
+        result = map_dbf_record_to_result(record, field_names)
+        
+        self.assertEqual(result['numer_dbf'], '12345')
+        self.assertEqual(result['stawka'], '150.00')
+        self.assertEqual(result['czesci'], 'ABC')
 
 
 class TestReadDBFRecordsWithExtraFields(unittest.TestCase):
@@ -624,15 +701,15 @@ class TestFormatQuadraResultWithExtraFields(unittest.TestCase):
         
         row = format_quadra_result_for_table(result)
         
-        # Expected format: [Numer z DBF, Stawka, Status, Arkusz, Kolumna, Wiersz, Czesci_extra, Uwagi]
+        # Expected format: [Arkusz, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi]
         self.assertEqual(len(row), 8)
-        self.assertEqual(row[0], '12345')  # Numer z DBF
-        self.assertEqual(row[1], '150.00')  # Stawka
-        self.assertEqual(row[2], 'Found')  # Status
-        self.assertEqual(row[3], 'Sheet1')  # Arkusz
-        self.assertEqual(row[4], 'Order')  # Kolumna
-        self.assertEqual(row[5], '6')  # Wiersz
-        self.assertEqual(row[6], 'ABC')  # Czesci_extra
+        self.assertEqual(row[0], 'Sheet1')  # Arkusz
+        self.assertEqual(row[1], '12345')  # Numer z DBF
+        self.assertEqual(row[2], '150.00')  # Stawka
+        self.assertEqual(row[3], 'ABC')  # Czesci
+        self.assertEqual(row[4], 'Found')  # Status
+        self.assertEqual(row[5], 'Order')  # Kolumna
+        self.assertEqual(row[6], '6')  # Wiersz
         self.assertEqual(row[7], 'Found in Sheet1 at B6')  # Uwagi
     
     def test_format_result_missing(self):
@@ -650,15 +727,16 @@ class TestFormatQuadraResultWithExtraFields(unittest.TestCase):
         
         row = format_quadra_result_for_table(result)
         
+        # Expected format: [Arkusz, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi]
         self.assertEqual(len(row), 8)
-        self.assertEqual(row[0], '99999')
-        self.assertEqual(row[1], '200.50')
-        self.assertEqual(row[2], 'Missing')
-        self.assertEqual(row[3], '')
-        self.assertEqual(row[4], '')
-        self.assertEqual(row[5], '')
-        self.assertEqual(row[6], 'XYZ')
-        self.assertEqual(row[7], 'Missing')
+        self.assertEqual(row[0], '')  # Arkusz
+        self.assertEqual(row[1], '99999')  # Numer z DBF
+        self.assertEqual(row[2], '200.50')  # Stawka
+        self.assertEqual(row[3], 'XYZ')  # Czesci
+        self.assertEqual(row[4], 'Missing')  # Status
+        self.assertEqual(row[5], '')  # Kolumna
+        self.assertEqual(row[6], '')  # Wiersz
+        self.assertEqual(row[7], 'Missing')  # Uwagi
 
 
 class TestExportQuadraResultsWithExtraFields(unittest.TestCase):
@@ -763,7 +841,7 @@ class TestWriteQuadraResultsToSheet(unittest.TestCase):
             valueInputOption='RAW',
             body={
                 'values': [
-                    ['Stawka', 'Czesci_extra'],
+                    ['Stawka', 'Czesci'],
                     ['150.00', 'ABC'],
                     ['200.50', 'XYZ']
                 ]
@@ -803,7 +881,7 @@ class TestWriteQuadraResultsToSheet(unittest.TestCase):
             valueInputOption='RAW',
             body={
                 'values': [
-                    ['Stawka', 'Czesci_extra'],
+                    ['Stawka', 'Czesci'],
                     ['', '']
                 ]
             }
