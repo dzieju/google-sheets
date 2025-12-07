@@ -24,6 +24,8 @@ from sheets_search import (
     ALL_COLUMNS_VALUES,
     parse_ignore_patterns,
     parse_header_rows,
+    get_sheet_headers_with_indices,
+    get_sheet_data,
 )
 from quadra_service import (
     read_dbf_column,
@@ -1434,7 +1436,6 @@ def main():
                         file_info = quadra_current_spreadsheets[idx]
                         spreadsheet_id = file_info["id"]
                         sheet_name = sheets_list[0]
-                        from sheets_search import get_sheet_headers_with_indices
                         headers = get_sheet_headers_with_indices(sheets_service, spreadsheet_id, sheet_name)
                         column_display = [f"{h['name']} (kolumna {h['index']})" for h in headers]
                         window["-QUADRA_COLUMN_SELECT-"].update(values=column_display)
@@ -1456,7 +1457,6 @@ def main():
                         idx = combo_values.index(selected_spreadsheet)
                         file_info = quadra_current_spreadsheets[idx]
                         spreadsheet_id = file_info["id"]
-                        from sheets_search import get_sheet_headers_with_indices
                         headers = get_sheet_headers_with_indices(sheets_service, spreadsheet_id, selected_sheet)
                         column_display = [f"{h['name']} (kolumna {h['index']})" for h in headers]
                         window["-QUADRA_COLUMN_SELECT-"].update(values=column_display)
@@ -1737,10 +1737,6 @@ def main():
                 
                 window["-STATUS_BAR-"].update("Ładowanie danych arkusza...")
                 
-                # Import functions
-                from sheets_search import get_sheet_data, get_sheet_headers_with_indices
-                import html
-                
                 # Get all data and headers
                 all_data = get_sheet_data(sheets_service, spreadsheet_id, selected_sheet)
                 headers_info = get_sheet_headers_with_indices(sheets_service, spreadsheet_id, selected_sheet)
@@ -1753,7 +1749,6 @@ def main():
                 selected_indices = []
                 for col_display in selected_columns:
                     # Extract index from format "Name (kolumna N)"
-                    import re
                     match = re.search(r'\(kolumna (\d+)\)', col_display)
                     if match:
                         selected_indices.append(int(match.group(1)) - 1)  # Convert to 0-based
@@ -1791,11 +1786,8 @@ def main():
                         preview_headers.append(f"Kolumna {idx + 1}")
                 
                 # Update preview table
-                window["-QUADRA_PREVIEW_TABLE-"].update(values=filtered_data[1:] if len(filtered_data) > 1 else [])
-                # Note: PySimpleGUI Table doesn't support dynamic headers well, so we keep them as is
-                # Users will see the headers as the first row
+                # Note: PySimpleGUI Table doesn't support dynamic headers well, so we include headers as first row
                 if filtered_data:
-                    # Include header row in data
                     window["-QUADRA_PREVIEW_TABLE-"].update(values=filtered_data)
                 
                 window["-STATUS_BAR-"].update(f"Podgląd {len(filtered_data)} wierszy w {len(selected_indices)} kolumnach")
