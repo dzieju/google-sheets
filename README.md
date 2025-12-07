@@ -32,6 +32,61 @@ Aplikacja CLI do przeszukiwania arkuszy Google należących do Twojego konta.
   python main.py search --regex --pattern "Faktura.*2025"
   ```
 
+### Niestandardowe nazwy kolumn
+
+Możesz dostosować nazwy kolumn w wynikach wyszukiwania CLI używając flagi `--column-names`. Funkcja jest dostępna również programowo w eksporcie CSV/JSON.
+
+#### Użycie w CLI
+
+Flaga `--column-names` akceptuje trzy formaty:
+
+1. **JSON object** - mapuje oryginalne nazwy na niestandardowe:
+   ```bash
+   python main.py search "test" --column-names '{"spreadsheetId": "ID arkusza", "sheetName": "Zakładka", "cell": "Komórka"}'
+   ```
+
+2. **JSON array** - nazwy w kolejności (spreadsheetId, spreadsheetName, sheetName, cell, searchedValue, stawka):
+   ```bash
+   python main.py search "test" --column-names '["ID", "Nazwa", "Zakładka", "Komórka", "Wartość", "Stawka"]'
+   ```
+
+3. **Lista rozdzielona przecinkami** - najprostszy format:
+   ```bash
+   python main.py search "test" --column-names "ID,Nazwa,Zakładka,Komórka,Wartość,Stawka"
+   ```
+
+#### Użycie programowe
+
+W eksporcie Quadra możesz użyć parametru `column_names`:
+
+```python
+from quadra_service import export_quadra_results_to_csv, export_quadra_results_to_json
+
+# Mapowanie słownikowe
+column_names = {
+    'DBF_Value': 'Numer zlecenia',
+    'Stawka': 'Cena',
+    'Status': 'Stan'
+}
+csv_data = export_quadra_results_to_csv(results, column_names=column_names)
+
+# Mapowanie listowe
+column_names = ['Numer', 'Cena', 'Stan', 'Arkusz', 'Kolumna', 
+                'Indeks kolumny', 'Indeks wiersza', 'Wartość', 'Części', 'Uwagi']
+json_data = export_quadra_results_to_json(results, column_names=column_names)
+```
+
+**Uwagi:**
+- Jeśli nie podasz wszystkich nazw w liście, pozostałe kolumny zachowają oryginalne nazwy
+- W przypadku słownika, nie zmapowane kolumny zachowują oryginalne nazwy
+- Bez parametru `column_names` używane są domyślne nazwy (zachowana kompatybilność wsteczna)
+
+**Przykład:**
+Zobacz plik `example_column_names.py` dla kompletnych przykładów użycia tej funkcji:
+```bash
+python example_column_names.py
+```
+
 ## Funkcjonalności wyszukiwania
 
 ### Wyszukiwanie w wielu kolumnach o tej samej nazwie

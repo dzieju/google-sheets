@@ -9,6 +9,8 @@ Functions:
 - format_quadra_results(results) - Format results for display and export
 """
 
+import csv
+import io
 import logging
 import re
 from typing import List, Dict, Any, Optional, Union, Tuple
@@ -674,19 +676,80 @@ def format_quadra_result_for_table(result: Dict[str, Any]) -> List[str]:
     ]
 
 
-def export_quadra_results_to_json(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def map_column_names(
+    original_columns: List[str],
+    column_names_option: Optional[Union[Dict[str, str], List[str]]] = None
+) -> List[str]:
+    """
+    Map original column names to custom display names.
+    
+    Args:
+        original_columns: List of original column names
+        column_names_option: Optional mapping configuration:
+            - Dict[str, str]: Maps original name -> display name (e.g., {"dbfValue": "Numer"})
+            - List[str]: Display names in order (e.g., ["Numer", "Stawka", ...])
+            - None: Return original column names unchanged
+    
+    Returns:
+        List of column names (mapped or original)
+    
+    Examples:
+        >>> map_column_names(['dbfValue', 'stawka'], {'dbfValue': 'Numer', 'stawka': 'Kwota'})
+        ['Numer', 'Kwota']
+        >>> map_column_names(['dbfValue', 'stawka'], ['Numer', 'Kwota'])
+        ['Numer', 'Kwota']
+        >>> map_column_names(['dbfValue', 'stawka'], None)
+        ['dbfValue', 'stawka']
+    """
+    if column_names_option is None:
+        return original_columns
+    
+    if isinstance(column_names_option, dict):
+        # Map using dictionary: original -> display name
+        return [column_names_option.get(col, col) for col in original_columns]
+    
+    elif isinstance(column_names_option, list):
+        # Use list in order, fallback to original if not enough elements
+        mapped = []
+        for i, col in enumerate(original_columns):
+            if i < len(column_names_option):
+                mapped.append(column_names_option[i])
+            else:
+                mapped.append(col)
+        return mapped
+    
+    # Fallback: return original if invalid type
+    return original_columns
+
+
+def export_quadra_results_to_json(
+    results: List[Dict[str, Any]],
+    column_names: Optional[Union[Dict[str, str], List[str]]] = None
+) -> List[Dict[str, Any]]:
     """
     Format Quadra results for JSON export.
     
     Args:
         results: List of result dictionaries from search_dbf_values_in_sheets
+        column_names: Optional custom column names mapping:
+            - Dict[str, str]: Maps original key -> display name
+            - List[str]: Display names in order matching default keys
+            - None: Use default key names
     
     Returns:
         List of dictionaries ready for JSON serialization
     """
+    # Define default keys in order
+    default_keys = ['dbfValue', 'stawka', 'status', 'sheetName', 'columnName', 
+                    'columnIndex', 'rowIndex', 'matchedValue', 'czesci', 'notes']
+    
+    # Map keys to display names
+    mapped_keys = map_column_names(default_keys, column_names)
+    
     export_list = []
     for result in results:
-        export_obj = {
+        # Build result dict with original keys
+        result_data = {
             'dbfValue': str(result['dbfValue']),
             'stawka': result.get('stawka', ''),
             'status': 'Found' if result['found'] else 'Missing',
@@ -698,29 +761,50 @@ def export_quadra_results_to_json(results: List[Dict[str, Any]]) -> List[Dict[st
             'czesci': result.get('czesci', ''),
             'notes': result.get('notes', '')
         }
+        
+        # Apply column name mapping if provided
+        if column_names is not None:
+            export_obj = {}
+            for i, orig_key in enumerate(default_keys):
+                mapped_key = mapped_keys[i]
+                export_obj[mapped_key] = result_data[orig_key]
+        else:
+            export_obj = result_data
+        
         export_list.append(export_obj)
     
     return export_list
 
 
-def export_quadra_results_to_csv(results: List[Dict[str, Any]]) -> str:
+def export_quadra_results_to_csv(
+    results: List[Dict[str, Any]],
+    column_names: Optional[Union[Dict[str, str], List[str]]] = None
+) -> str:
     """
     Format Quadra results for CSV export.
     
     Args:
         results: List of result dictionaries from search_dbf_values_in_sheets
+        column_names: Optional custom column names mapping:
+            - Dict[str, str]: Maps original key -> display name
+            - List[str]: Display names in order matching default headers
+            - None: Use default header names
     
     Returns:
         CSV string with header and data rows
     """
-    import csv
-    import io
-    
     output = io.StringIO()
     writer = csv.writer(output)
     
+    # Define default headers
+    default_headers = ['DBF_Value', 'Stawka', 'Status', 'SheetName', 'ColumnName', 
+                       'ColumnIndex', 'RowIndex', 'MatchedValue', 'Czesci', 'Notes']
+    
+    # Map headers to display names
+    headers = map_column_names(default_headers, column_names)
+    
     # Write header
-    writer.writerow(['DBF_Value', 'Stawka', 'Status', 'SheetName', 'ColumnName', 'ColumnIndex', 'RowIndex', 'MatchedValue', 'Czesci', 'Notes'])
+    writer.writerow(headers)
     
     # Write data
     for result in results:
