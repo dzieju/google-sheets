@@ -11,6 +11,8 @@ Test Dependencies:
 import unittest
 import tempfile
 import os
+import shutil
+import dbf
 from unittest.mock import MagicMock, patch
 from quadra_service import (
     column_letter_to_index,
@@ -290,8 +292,6 @@ class TestDBFReading(unittest.TestCase):
     
     def setUp(self):
         """Create a temporary DBF file for testing."""
-        import dbf
-        
         # Create temporary DBF file
         self.temp_dir = tempfile.mkdtemp()
         self.dbf_path = os.path.join(self.temp_dir, 'test.dbf')
@@ -305,7 +305,6 @@ class TestDBFReading(unittest.TestCase):
     
     def tearDown(self):
         """Clean up temporary files."""
-        import shutil
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
     

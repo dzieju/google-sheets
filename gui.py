@@ -6,6 +6,7 @@ Wykorzystuje istniejące moduły google_auth i sheets_search.
 
 import json
 import os
+import re
 import threading
 
 import FreeSimpleGUI as sg
@@ -1384,7 +1385,6 @@ def main():
             column_names = None
             if column_filter:
                 # Split by comma/semicolon/newline
-                import re
                 column_names = [c.strip() for c in re.split(r'[,;\n]+', column_filter) if c.strip()]
             
             # Disable check button, enable stop
@@ -1457,7 +1457,6 @@ def main():
             )
             if filename:
                 try:
-                    import json
                     export_data = export_quadra_results_to_json(results)
                     with open(filename, "w", encoding="utf-8") as f:
                         json.dump(export_data, f, ensure_ascii=False, indent=2)
