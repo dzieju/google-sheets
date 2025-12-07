@@ -708,7 +708,7 @@ def map_column_names(
         # Map using dictionary: original -> display name
         return [column_names_option.get(col, col) for col in original_columns]
     
-    if isinstance(column_names_option, list):
+    elif isinstance(column_names_option, list):
         # Use list in order, fallback to original if not enough elements
         mapped = []
         for i, col in enumerate(original_columns):

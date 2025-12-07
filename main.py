@@ -129,12 +129,13 @@ def main():
     args = p.parse_args()
     
     # Parse column names if provided for search command
-    if args.cmd == "search" and hasattr(args, 'column_names') and args.column_names:
-        args.column_names = parse_column_names_arg(args.column_names)
-        if args.column_names is None:
-            p_search.error("Nieprawidłowy format --column-names. Użyj JSON object, JSON array lub listy rozdzielonej przecinkami.")
-    else:
-        if hasattr(args, 'column_names'):
+    if args.cmd == "search":
+        column_names_str = getattr(args, 'column_names', None)
+        if column_names_str:
+            args.column_names = parse_column_names_arg(column_names_str)
+            if args.column_names is None:
+                p_search.error("Nieprawidłowy format --column-names. Użyj JSON object, JSON array lub listy rozdzielonej przecinkami.")
+        else:
             args.column_names = None
     
     if args.cmd == "list":
