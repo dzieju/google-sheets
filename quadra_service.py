@@ -131,26 +131,27 @@ def map_dbf_record_to_result(
     - 'numer_dbf' from field names: NUMER, NUMBER, NR, ORDER, ZLECENIE
     - 'stawka' from field names: STAWKA, STAW, RATE, PRICE, CENA
     - 'czesci' from field names: CZESCI, PARTS, CZESC, PART
+    - 'platnik' from user mapping only (no auto-detection)
     
     Args:
         record: DBF record as dictionary
         field_names: List of all field names in the DBF table
         mapping: Optional dict mapping app_field -> dbf_field_name
-                 e.g., {'stawka': 'RATE', 'czesci': 'PARTS', 'numer_dbf': 'ORDER'}
+                 e.g., {'stawka': 'RATE', 'czesci': 'PARTS', 'numer_dbf': 'ORDER', 'platnik': 'PAYER'}
                  If provided, overrides autodetection for specified fields
     
     Returns:
-        Dictionary with 'numer_dbf', 'stawka' and 'czesci' keys (empty strings if not found)
+        Dictionary with 'numer_dbf', 'stawka', 'czesci', and 'platnik' keys (empty strings if not found)
     
     Examples:
         >>> record = {'NUMER': '12345', 'STAWKA': '150.00', 'CZESCI': 'ABC'}
         >>> field_names = ['NUMER', 'STAWKA', 'CZESCI']
         >>> map_dbf_record_to_result(record, field_names)
-        {'numer_dbf': '12345', 'stawka': '150.00', 'czesci': 'ABC'}
+        {'numer_dbf': '12345', 'stawka': '150.00', 'czesci': 'ABC', 'platnik': ''}
         
-        >>> # With custom mapping
-        >>> map_dbf_record_to_result(record, field_names, {'stawka': 'STAWKA', 'czesci': 'CZESCI'})
-        {'numer_dbf': '12345', 'stawka': '150.00', 'czesci': 'ABC'}
+        >>> # With custom mapping including platnik
+        >>> map_dbf_record_to_result(record, field_names, {'stawka': 'STAWKA', 'czesci': 'CZESCI', 'platnik': 'PAYER'})
+        {'numer_dbf': '12345', 'stawka': '150.00', 'czesci': 'ABC', 'platnik': ''}
     """
     mapping = mapping or {}
     
@@ -169,6 +170,11 @@ def map_dbf_record_to_result(
         czesci_field = mapping['czesci']
     else:
         czesci_field = detect_dbf_field_name(field_names, DBF_CZESCI_FIELD_NAMES)
+    
+    # Platnik field (user-mapped only, no auto-detection)
+    platnik_field = None
+    if 'platnik' in mapping and mapping['platnik'] in field_names:
+        platnik_field = mapping['platnik']
     
     # Extract values
     numer_value = ''
@@ -189,10 +195,18 @@ def map_dbf_record_to_result(
         if val is not None:
             czesci_value = str(val).strip()
     
+    # Extract platnik value if mapped
+    platnik_value = ''
+    if platnik_field and platnik_field in record:
+        val = record[platnik_field]
+        if val is not None:
+            platnik_value = str(val).strip()
+    
     return {
         'numer_dbf': numer_value,
         'stawka': stawka_value,
-        'czesci': czesci_value
+        'czesci': czesci_value,
+        'platnik': platnik_value
     }
 
 
@@ -286,21 +300,21 @@ def read_dbf_records_with_extra_fields(
     mapping: Optional[Dict[str, str]] = None
 ) -> List[Dict[str, Any]]:
     """
-    Read DBF records with main column value and additional fields (numer_dbf, stawka, czesci).
+    Read DBF records with main column value and additional fields (numer_dbf, stawka, czesci, platnik).
     
     Args:
         dbf_path: Path to the DBF file
         column_identifier: Column to read main values from (default 'B')
         mapping: Optional dict mapping app_field -> dbf_field_name
-                 e.g., {'stawka': 'RATE', 'czesci': 'PARTS', 'numer_dbf': 'ORDER'}
+                 e.g., {'stawka': 'RATE', 'czesci': 'PARTS', 'numer_dbf': 'ORDER', 'platnik': 'PAYER'}
     
     Returns:
-        List of dictionaries with 'value', 'numer_dbf', 'stawka', and 'czesci' keys
+        List of dictionaries with 'value', 'numer_dbf', 'stawka', 'czesci', and 'platnik' keys
         
     Example:
         >>> records = read_dbf_records_with_extra_fields('orders.dbf', 'B')
         >>> records[0]
-        {'value': '12345', 'numer_dbf': '12345', 'stawka': '150.00', 'czesci': 'ABC'}
+        {'value': '12345', 'numer_dbf': '12345', 'stawka': '150.00', 'czesci': 'ABC', 'platnik': 'XYZ'}
     
     Raises:
         FileNotFoundError: If DBF file doesn't exist
@@ -338,14 +352,15 @@ def read_dbf_records_with_extra_fields(
         if main_value is None or not str(main_value).strip():
             continue  # Skip empty records
         
-        # Map additional fields
+        # Map additional fields (including platnik if mapped)
         extra_fields = map_dbf_record_to_result(record, field_names, mapping)
         
         records.append({
             'value': main_value,
             'numer_dbf': extra_fields['numer_dbf'],
             'stawka': extra_fields['stawka'],
-            'czesci': extra_fields['czesci']
+            'czesci': extra_fields['czesci'],
+            'platnik': extra_fields['platnik']
         })
     
     logger.info(f"Read {len(records)} records from DBF with extra fields")
@@ -564,10 +579,12 @@ def search_dbf_values_in_sheets(
             dbf_value = dbf_item.get('value')
             stawka = dbf_item.get('stawka', '')
             czesci = dbf_item.get('czesci', '')
+            platnik = dbf_item.get('platnik', '')  # Extract platnik from DBF record
         else:
             dbf_value = dbf_item
             stawka = ''
             czesci = ''
+            platnik = ''
         
         found = False
         match_info = None
@@ -599,7 +616,8 @@ def search_dbf_values_in_sheets(
                 'matchedValue': match_info['value'],
                 'notes': f"Found in {match_info['sheetName']} at {col_index_to_a1(match_info['columnIndex'])}{match_info['rowIndex'] + 1}",
                 'stawka': stawka,
-                'czesci': czesci
+                'czesci': czesci,
+                'platnik': platnik
             }
         else:
             result = {
@@ -612,7 +630,8 @@ def search_dbf_values_in_sheets(
                 'matchedValue': None,
                 'notes': 'Missing',
                 'stawka': stawka,
-                'czesci': czesci
+                'czesci': czesci,
+                'platnik': platnik
             }
         
         results.append(result)
@@ -629,7 +648,7 @@ def format_quadra_result_for_table(result: Dict[str, Any]) -> List[str]:
         result: Result dictionary from search_dbf_values_in_sheets
     
     Returns:
-        List of strings for table row: [Arkusz, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi]
+        List of strings for table row: [Arkusz, Płatnik, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi]
     """
     status = "Found" if result['found'] else "Missing"
     sheet_name = result.get('sheetName', '') or ''
@@ -640,16 +659,18 @@ def format_quadra_result_for_table(result: Dict[str, Any]) -> List[str]:
     stawka = result.get('stawka', '') or ''
     czesci = result.get('czesci', '') or ''
     numer_dbf = str(result.get('dbfValue', ''))
+    platnik = result.get('platnik', '') or ''  # Extract platnik, default to empty string if missing
     
     return [
-        sheet_name,
-        numer_dbf,
-        stawka,
-        czesci,
-        status,
-        column_name,
-        row_display,
-        notes
+        sheet_name,      # Arkusz
+        platnik,         # Płatnik (newly added as second column)
+        numer_dbf,       # Numer z DBF
+        stawka,          # Stawka
+        czesci,          # Czesci
+        status,          # Status
+        column_name,     # Kolumna
+        row_display,     # Wiersz
+        notes            # Uwagi
     ]
 
 

@@ -685,8 +685,8 @@ def create_single_sheet_search_tab():
 
 def create_quadra_tab():
     """Create Quadra tab layout for checking DBF order numbers against Google Sheets."""
-    # Updated table headings: Arkusz, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi
-    table_headings = ["Arkusz", "Numer z DBF", "Stawka", "Czesci", "Status", "Kolumna", "Wiersz", "Uwagi"]
+    # Updated table headings: Arkusz, Płatnik, Numer z DBF, Stawka, Czesci, Status, Kolumna, Wiersz, Uwagi
+    table_headings = ["Arkusz", "Płatnik", "Numer z DBF", "Stawka", "Czesci", "Status", "Kolumna", "Wiersz", "Uwagi"]
     
     return [
         [sg.Text("Quadra: Sprawdzanie numerów zleceń z DBF", font=("Helvetica", 12, "bold"))],
