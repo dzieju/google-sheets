@@ -1395,12 +1395,17 @@ def main():
         
         elif event == "-QUADRA_CONFIG_MAPPING-":
             # Toggle visibility of mapping panel
-            current_visible = window["-QUADRA_MAPPING_PANEL-"].metadata.get('visible', False) if hasattr(window["-QUADRA_MAPPING_PANEL-"], 'metadata') else False
+            panel = window["-QUADRA_MAPPING_PANEL-"]
+            # Ensure metadata is a dict (some GUI frameworks may initialize it as None)
+            meta = getattr(panel, 'metadata', None)
+            if meta is None or not isinstance(meta, dict):
+                # initialize metadata to an empty dict to avoid AttributeError on .get
+                panel.metadata = {}
+                meta = panel.metadata
+            current_visible = bool(meta.get('visible', False))
             new_visible = not current_visible
-            window["-QUADRA_MAPPING_PANEL-"].update(visible=new_visible)
-            if not hasattr(window["-QUADRA_MAPPING_PANEL-"], 'metadata'):
-                window["-QUADRA_MAPPING_PANEL-"].metadata = {}
-            window["-QUADRA_MAPPING_PANEL-"].metadata['visible'] = new_visible
+            panel.update(visible=new_visible)
+            panel.metadata['visible'] = new_visible
         
         elif event == "-QUADRA_APPLY_MAPPING-":
             # Apply user-configured mapping
