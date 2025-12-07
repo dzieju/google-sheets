@@ -8,6 +8,7 @@ import json
 import os
 import re
 import threading
+from typing import Optional, Union, Dict, List
 
 import FreeSimpleGUI as sg
 
