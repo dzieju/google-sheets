@@ -131,7 +131,7 @@ def map_dbf_record_to_result(
     - 'numer_dbf' from field names: NUMER, NUMBER, NR, ORDER, ZLECENIE
     - 'stawka' from field names: STAWKA, STAW, RATE, PRICE, CENA
     - 'czesci' from field names: CZESCI, PARTS, CZESC, PART
-    - 'platnik' from field names: PLATNIK, PAYER (user-mapped only, no auto-detection)
+    - 'platnik' from user mapping only (no auto-detection)
     
     Args:
         record: DBF record as dictionary
@@ -149,8 +149,8 @@ def map_dbf_record_to_result(
         >>> map_dbf_record_to_result(record, field_names)
         {'numer_dbf': '12345', 'stawka': '150.00', 'czesci': 'ABC', 'platnik': ''}
         
-        >>> # With custom mapping
-        >>> map_dbf_record_to_result(record, field_names, {'stawka': 'STAWKA', 'czesci': 'CZESCI'})
+        >>> # With custom mapping including platnik
+        >>> map_dbf_record_to_result(record, field_names, {'stawka': 'STAWKA', 'czesci': 'CZESCI', 'platnik': 'PAYER'})
         {'numer_dbf': '12345', 'stawka': '150.00', 'czesci': 'ABC', 'platnik': ''}
     """
     mapping = mapping or {}
