@@ -78,6 +78,10 @@ json_data = export_quadra_results_to_json(results, column_names=column_names)
 
 #### Użycie w interfejsie Quadra (GUI)
 
+**Zakładka Quadra automatycznie stosuje mapowanie nazw kolumn przy renderowaniu nagłówków tabeli.**
+
+Mapowanie można skonfigurować w pliku: **`~/.google_sheets_settings.json`**
+
 Zakładka Quadra wspiera niestandardowe nazwy kolumn w tabeli wyników poprzez plik konfiguracyjny:
 
 1. **Plik konfiguracyjny**: `~/.google_sheets_settings.json`
