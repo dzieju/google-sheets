@@ -34,7 +34,7 @@ Aplikacja CLI do przeszukiwania arkuszy Google należących do Twojego konta.
 
 ### Niestandardowe nazwy kolumn
 
-Możesz dostosować nazwy kolumn w wynikach wyszukiwania CLI używając flagi `--column-names`. Funkcja jest dostępna również programowo w eksporcie CSV/JSON.
+Możesz dostosować nazwy kolumn w wynikach wyszukiwania CLI używając flagi `--column-names`. Funkcja jest dostępna również programowo w eksporcie CSV/JSON oraz w interfejsie Quadra.
 
 #### Użycie w CLI
 
@@ -76,10 +76,60 @@ column_names = ['Numer', 'Cena', 'Stan', 'Arkusz', 'Kolumna',
 json_data = export_quadra_results_to_json(results, column_names=column_names)
 ```
 
+#### Użycie w interfejsie Quadra (GUI)
+
+Zakładka Quadra wspiera niestandardowe nazwy kolumn w tabeli wyników poprzez plik konfiguracyjny:
+
+1. **Plik konfiguracyjny**: `~/.google_sheets_settings.json`
+2. **Klucz konfiguracji**: `quadra_column_names`
+3. **Format**: Słownik lub lista (zgodny z CLI i eksportami)
+
+**Przykład konfiguracji** (`~/.google_sheets_settings.json`):
+
+```json
+{
+  "quadra_column_names": {
+    "Arkusz": "Sheet",
+    "Płatnik": "Payer",
+    "Numer z DBF": "Order Number",
+    "Stawka": "Rate",
+    "Czesci": "Parts",
+    "Status": "Status",
+    "Kolumna": "Column",
+    "Wiersz": "Row",
+    "Uwagi": "Notes"
+  }
+}
+```
+
+Lub z listą (w kolejności):
+
+```json
+{
+  "quadra_column_names": [
+    "Sheet",
+    "Payer", 
+    "Order Number",
+    "Rate",
+    "Parts",
+    "Status",
+    "Column",
+    "Row",
+    "Notes"
+  ]
+}
+```
+
+**Normalizacja mapowania:**
+- Dopasowanie jest **niewrażliwe na wielkość liter**: "Arkusz" = "arkusz" = "ARKUSZ"
+- **Ignoruje białe znaki**: " Arkusz " = "Arkusz"
+- **Obsługuje Unicode**: Znaki diakrytyczne są normalizowane
+
 **Uwagi:**
 - Jeśli nie podasz wszystkich nazw w liście, pozostałe kolumny zachowają oryginalne nazwy
 - W przypadku słownika, nie zmapowane kolumny zachowują oryginalne nazwy
-- Bez parametru `column_names` używane są domyślne nazwy (zachowana kompatybilność wsteczna)
+- Bez parametru `column_names` używane są domyślne nazwy polskie (zachowana kompatybilność wsteczna)
+- Po zmianie konfiguracji, uruchom aplikację ponownie aby zobaczyć nowe nagłówki
 
 **Przykład:**
 Zobacz plik `example_column_names.py` dla kompletnych przykładów użycia tej funkcji:
